@@ -3,7 +3,7 @@ import Link from "next/link"
 import { Smartphone, Laptop, Volume2, Watch, Gamepad2, ArrowRight } from "lucide-react"
 
 const CARDS = [
-  { label: "Phones",    href: "/admin/phones",   icon: Smartphone, color: "from-purple-600 to-violet-600" },
+  { label: "Phones",    href: "/phones",   icon: Smartphone, color: "from-purple-600 to-violet-600" },
   { label: "Laptops",   href: "/admin/laptops",  icon: Laptop,     color: "from-blue-600 to-cyan-600"    },
   { label: "Speakers",  href: "/admin/speakers", icon: Volume2,    color: "from-emerald-600 to-teal-600" },
   { label: "Wearables", href: "/admin/wearables",icon: Watch,      color: "from-amber-600 to-orange-600" },
@@ -20,7 +20,7 @@ export default function AdminDashboard() {
         >
           Dashboard
         </h1>
-        <p className="mt-1 text-sm text-[#8884a0]">Manage your gadget spec database</p>
+        <p className="mt-1 text-sm text-[#8884a0]">Manage your gadget database</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

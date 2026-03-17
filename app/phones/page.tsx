@@ -1,6 +1,7 @@
 // app/admin/phones/page.tsx  — Server Component
-import { PhoneAdminClient } from "@/components/admin/phone-admin-client"
-import { PhoneAPI } from "@/types/phone"
+
+import { PhoneAdminClient } from "@/components/phone-admin-client"
+import { PhoneAPI } from "@/lib/phone"
 
 async function getPhones(): Promise<PhoneAPI[]> {
   try {
