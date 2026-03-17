@@ -131,7 +131,7 @@ function DetailDrawer({
           </div>
           <div className="flex items-center gap-2">
             <Link
-              href={`/admin/phones/${phone.id}/edit`}
+              href={`/phones/${phone.id}/edit`}
               className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/15 px-3 py-1.5 text-xs font-semibold text-purple-300 transition-all hover:bg-purple-500/25"
             >
               <Pencil className="h-3 w-3" />
@@ -182,7 +182,7 @@ function DetailDrawer({
                 View on site
               </Link>
               <Link
-                href={`/admin/phones/${phone.id}/edit`}
+                href={`/phones/${phone.id}/edit`}
                 className="flex items-center gap-1.5 rounded-full border border-purple-500/25 bg-purple-500/10 px-3 py-1.5 text-xs text-purple-300 transition-all hover:bg-purple-500/20"
               >
                 <Pencil className="h-3 w-3" />
@@ -331,7 +331,7 @@ function PhoneRow({
 
           {/* Edit */}
           <Link
-            href={`/admin/phones/${phone.id}/edit`}
+            href={`/phones/${phone.id}/edit`}
             className="flex h-7 items-center gap-1 rounded-lg border border-white/[0.08] px-2.5 text-[11px] font-medium text-[#8884a0] transition-all hover:border-purple-500/40 hover:text-purple-300"
             title="Edit phone"
           >
