@@ -110,7 +110,6 @@ function ImageUpload({
   }
 
   const handleFile = async (file: File) => {
-    // Size check
     if (file.size > MAX_MB * 1024 * 1024) {
       setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: `File too large — max ${MAX_MB}MB` })
       return
@@ -118,28 +117,59 @@ function ImageUpload({
 
     setUpload({ status: "uploading", progress: 0, fileName: file.name, errorMsg: "" })
 
-    let progressTimer: ReturnType<typeof setInterval>
+    let progressTimer: ReturnType<typeof setInterval> | undefined
 
     try {
-      const formData = new FormData()
-      formData.append("file", file)
+      // ── Step 1: Ask server for presigned POST URL ──────────────
+      setUpload((p) => ({ ...p, progress: 10 }))
 
-      // Start fake progress
-      progressTimer = simulateProgress(() => {})
+      const prepRes = await fetch("/api/upload/prepare", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+        }),
+      })
 
-      const res  = await fetch("/api/upload", { method: "POST", body: formData })
-      clearInterval(progressTimer)
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error ?? `Upload failed (${res.status})`)
+      if (!prepRes.ok) {
+        const err = await prepRes.json().catch(() => ({}))
+        throw new Error(err.error ?? "Failed to prepare upload")
       }
 
-      const { url } = await res.json()
+      const { url, fields, key, viewUrl } = await prepRes.json()
+
+      // ── Step 2: Client uploads directly to Railway bucket ──────
+      setUpload((p) => ({ ...p, progress: 25 }))
+
+      progressTimer = setInterval(() => {
+        setUpload((p) => {
+          const next = Math.min(p.progress + Math.random() * 15, 90)
+          return { ...p, progress: Math.round(next) }
+        })
+      }, 200)
+
+      const form = new FormData()
+      Object.entries(fields as Record<string, string>).forEach(([k, v]) => form.append(k, v))
+      form.append("Content-Type", file.type)
+      form.append("file", file)
+
+      const uploadRes = await fetch(url, { method: "POST", body: form })
+      clearInterval(progressTimer)
+
+      if (!uploadRes.ok && uploadRes.status !== 204) {
+        const text = await uploadRes.text()
+        throw new Error(`Upload failed (${uploadRes.status}): ${text.slice(0, 120)}`)
+      }
+
+      // ── Step 3: viewUrl is already a working presigned GET URL ──
+      // Store this directly in DB — <img src={viewUrl} /> works immediately
       setUpload({ status: "success", progress: 100, fileName: file.name, errorMsg: "" })
-      onChange(url)
+      onChange(viewUrl)
+
     } catch (err: any) {
-      clearInterval(progressTimer!)
+      if (progressTimer) clearInterval(progressTimer)
       setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: err.message ?? "Upload failed" })
     }
   }
@@ -261,7 +291,7 @@ function ImageUpload({
                   <div className="flex items-center gap-1.5">
                     <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
                     <p className="text-xs font-semibold text-emerald-300">Uploaded successfully</p>
-                  </div>
+                  </div>    
                   <p className="mt-0.5 text-[10px] text-[#8884a0] truncate">{upload.fileName}</p>
                   <p className="mt-0.5 text-[10px] text-[#8884a0]/60 truncate">{value}</p>
                 </div>
