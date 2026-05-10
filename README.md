@@ -1,5 +1,15 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## 🚀 Quick Access
+
+### Admin Panel
+Access the professional admin dashboard:
+- **Dashboard**: [http://localhost:3000/admin](http://localhost:3000/admin)
+- **Phones Management**: [http://localhost:3000/admin/phones](http://localhost:3000/admin/phones)
+- **Laptops Management**: [http://localhost:3000/admin/laptops](http://localhost:3000/admin/laptops)
+
+**For detailed admin documentation, see [ADMIN_GUIDE.md](./ADMIN_GUIDE.md)**
+
 ## Getting Started
 
 First, run the development server:
@@ -19,6 +29,15 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Admin Panel Features
+
+✅ Professional sidebar navigation  
+✅ Reusable AdminTable component for any resource  
+✅ Built-in search, filter, and delete with confirmation  
+✅ Responsive design (mobile, tablet, desktop)  
+✅ Dark theme matching your existing design  
+✅ Edit and add pages with form validation  
 
 ## Learn More
 

@@ -1,15 +1,12 @@
+// components/phone-form.tsx
 "use client"
 
-// components/admin/phone-form.tsx
-// Full phone form with Railway bucket image upload
-// Upload flow: pick file → POST /api/upload → get URL → save in form data
-
-import { useState, useEffect, useRef } from "react"
-import { Upload, X, CheckCircle2, AlertCircle, ImageIcon, Link2 } from "lucide-react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import {
-  Field, TextInput, SelectInput, TagInput,
-  FormSection, SubmitButton, Alert,
-} from "@/components/form-fields"
+  Upload, X, CheckCircle2, AlertCircle, ImageIcon, Link2, Trash2,
+  Calendar, Smartphone, Palette, Camera, Battery,
+  Monitor, HardDrive, Sparkles, Copy, ChevronDown, Loader2
+} from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────
 export interface PhoneFormData {
@@ -18,6 +15,7 @@ export interface PhoneFormData {
   slug: string
   model: string
   image: string
+  // ✅ imagePublicId removed — it's client-only and never sent to backend
   screen_size: string
   screen_resolution: string
   ram: string
@@ -31,59 +29,228 @@ export interface PhoneFormData {
 }
 
 const EMPTY: PhoneFormData = {
-  name: "", brand: "", slug: "", model: "", image: "",
-  screen_size: "", screen_resolution: "", ram: "", storage: "",
-  main_camera: "", selfie_camera: "", battery: "",
-  colors: [], features: [], release_date: "",
+  name: "", brand: "", slug: "", model: "",
+  image: "",
+  screen_size: "", screen_resolution: "",
+  ram: "", storage: "",
+  main_camera: "", selfie_camera: "",
+  battery: "", colors: [], features: [], release_date: "",
 }
 
-type Errors = Partial<Record<keyof PhoneFormData, string>>
-
-// ─── Upload state ─────────────────────────────────────────────
-type UploadStatus = "idle" | "uploading" | "success" | "error"
+type UploadStatus = "idle" | "dragging" | "uploading" | "success" | "error"
 
 interface UploadState {
   status: UploadStatus
-  progress: number      // 0–100
+  progress: number
   fileName: string
   errorMsg: string
 }
 
 const EMPTY_UPLOAD: UploadState = {
-  status: "idle",
-  progress: 0,
-  fileName: "",
-  errorMsg: "",
+  status: "idle", progress: 0, fileName: "", errorMsg: "",
 }
 
 // ─── Validation ───────────────────────────────────────────────
-function validate(d: PhoneFormData): Errors {
-  const e: Errors = {}
-  if (!d.name.trim())    e.name         = "Required"
-  if (!d.brand.trim())   e.brand        = "Required"
-  if (!d.slug.trim())    e.slug         = "Required"
-  if (d.slug && !/^[a-z0-9-]+$/.test(d.slug))
-                         e.slug         = "Lowercase letters, numbers and hyphens only"
-  if (!d.model.trim())   e.model        = "Required"
-  if (!d.image.trim())   e.image        = "Image is required — upload a file or paste a URL"
-  if (!d.release_date)   e.release_date = "Required"
-  if (!d.battery.trim()) e.battery      = "Required"
-  if (!d.colors.length)  e.colors       = "Add at least one color"
+function validate(d: PhoneFormData, mode: "create" | "edit" = "create") {
+  const e: Partial<Record<keyof PhoneFormData, string>> = {}
+  if (!d.name.trim()) e.name = "Phone name is required"
+  if (!d.brand.trim()) e.brand = "Brand is required"
+  if (!d.slug.trim()) e.slug = "Slug is required"
+  if (!d.model.trim()) e.model = "Model number is required"
+  if (mode === "create" && !d.image?.trim()) e.image = "Please upload a phone image"
+  if (!d.release_date) e.release_date = "Release date is required"
+  if (!d.battery.trim()) e.battery = "Battery capacity is required"
+  if (!d.colors.length) e.colors = "Add at least one color"
   return e
 }
 
 function toSlug(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+  return name.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
 }
 
-const RAM_OPTIONS     = ["2GB","3GB","4GB","6GB","8GB","12GB","16GB","24GB"]
-  .map(v => ({ value: v, label: v }))
-const STORAGE_OPTIONS = ["32GB","64GB","128GB","256GB","512GB","1TB"]
-  .map(v => ({ value: v, label: v }))
-const ACCEPTED        = "image/jpeg,image/png,image/webp,image/avif"
-const MAX_MB          = 5
+// ─── Cloudinary Helpers ───────────────────────────────────────
+function extractPublicId(url: string): string | null {
+  try {
+    const match = url.match(/\/upload\/v\d+\/(.+)\.[^.]+$/)
+    return match ? match[1] : null
+  } catch {
+    return null
+  }
+}
 
-// ─── Image Upload Widget ──────────────────────────────────────
+async function deleteCloudinaryImage(publicId: string): Promise<void> {
+  await fetch("/api/upload/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ public_id: publicId }),
+  })
+}
+
+// ─── Options ──────────────────────────────────────────────────
+const RAM_OPTIONS = ["2GB","3GB","4GB","6GB","8GB","12GB","16GB","24GB"]
+const STORAGE_OPTIONS = ["32GB","64GB","128GB","256GB","512GB","1TB"]
+const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/avif"
+const MAX_MB = 5
+const ACCEPTED_EXTS = ["jpg", "jpeg", "png", "webp", "avif"]
+
+// ─── Reusable UI Components ───────────────────────────────────
+
+function Section({ title, icon: Icon, children, className = "" }: {
+  title: string
+  icon?: React.ComponentType<{ className?: string }>
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <div className={`rounded-2xl border border-white/[0.06] bg-[#13131a] overflow-hidden ${className}`}>
+      <div className="flex items-center gap-2.5 border-b border-white/[0.04] px-6 py-4">
+        {Icon && <Icon className="h-4 w-4 text-purple-400" />}
+        <h3 className="text-sm font-semibold text-[#f0eeff]">{title}</h3>
+      </div>
+      <div className="p-6 space-y-5">{children}</div>
+    </div>
+  )
+}
+
+function Label({ children, required, hint }: { children: React.ReactNode; required?: boolean; hint?: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <label className="text-xs font-medium text-[#a0a0b8]">{children}</label>
+      {required && <span className="text-[10px] text-red-400">*</span>}
+      {hint && <span className="text-[10px] text-[#555570] ml-auto">{hint}</span>}
+    </div>
+  )
+}
+
+function Input({
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  error,
+  icon: Icon,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+  error?: string
+  icon?: React.ComponentType<{ className?: string }>
+}) {
+  return (
+    <div>
+      <div className="relative">
+        {Icon && (
+          <Icon className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#555570]" />
+        )}
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`w-full rounded-xl border bg-[#0e0e16] px-4 py-2.5 text-sm text-[#f0eeff] placeholder:text-[#444460] outline-none transition-all
+            ${Icon ? "pl-11" : ""}
+            ${error
+              ? "border-red-500/30 focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20"
+              : "border-white/[0.06] focus:border-purple-500/40 focus:ring-1 focus:ring-purple-500/15"
+            }`}
+        />
+      </div>
+      {error && <p className="mt-1.5 text-[11px] text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+function Select({ value, onChange, options, placeholder }: {
+  value: string
+  onChange: (v: string) => void
+  options: string[]
+  placeholder: string
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full appearance-none rounded-xl border border-white/[0.06] bg-[#0e0e16] px-4 py-2.5 text-sm text-[#f0eeff] outline-none transition-all focus:border-purple-500/40 focus:ring-1 focus:ring-purple-500/15"
+      >
+        <option value="" className="bg-[#0e0e16] text-[#444460]">{placeholder}</option>
+        {options.map((opt) => (
+          <option key={opt} value={opt} className="bg-[#0e0e16]">{opt}</option>
+        ))}
+      </select>
+      <ChevronDown className="absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#555570] pointer-events-none" />
+    </div>
+  )
+}
+
+function TagInput({ values, onChange, placeholder }: {
+  values: string[]
+  onChange: (v: string[]) => void
+  placeholder: string
+}) {
+  const [input, setInput] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const addTag = useCallback(() => {
+    const trimmed = input.trim()
+    if (trimmed && !values.includes(trimmed)) {
+      onChange([...values, trimmed])
+      setInput("")
+    }
+  }, [input, values, onChange])
+
+  const removeTag = useCallback((tag: string) => {
+    onChange(values.filter((v) => v !== tag))
+  }, [values, onChange])
+
+  return (
+    <div
+      onClick={() => inputRef.current?.focus()}
+      className="min-h-[46px] cursor-text rounded-xl border border-white/[0.06] bg-[#0e0e16] px-3 py-2 transition-all focus-within:border-purple-500/40 focus-within:ring-1 focus-within:ring-purple-500/15"
+    >
+      <div className="flex flex-wrap gap-2">
+        {values.map((tag) => (
+          <span
+            key={tag}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-purple-500/10 px-2.5 py-1 text-xs font-medium text-purple-300"
+          >
+            {tag}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); removeTag(tag) }}
+              className="text-purple-400/60 hover:text-purple-300 transition-colors"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault()
+              addTag()
+            }
+            if (e.key === "Backspace" && !input && values.length) {
+              removeTag(values[values.length - 1])
+            }
+          }}
+          onBlur={addTag}
+          placeholder={values.length ? "" : placeholder}
+          className="min-w-[80px] flex-1 bg-transparent text-sm text-[#f0eeff] placeholder:text-[#444460] outline-none py-1"
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─── Image Upload Component ───────────────────────────────────
+// publicId is tracked entirely in this component — never exposed to parent or backend
 function ImageUpload({
   value,
   onChange,
@@ -94,235 +261,224 @@ function ImageUpload({
   error?: string
 }) {
   const [upload, setUpload] = useState<UploadState>(EMPTY_UPLOAD)
-  const [tab, setTab]       = useState<"upload" | "url">("upload")
-  const inputRef            = useRef<HTMLInputElement>(null)
+  const [tab, setTab] = useState<"upload" | "url">("upload")
+  const [isDragging, setIsDragging] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Simulate XHR progress (fetch doesn't expose progress)
-  // Uses a fake progress that runs while the real upload is in flight
-  const simulateProgress = (onDone: () => void) => {
-    let p = 0
-    const id = setInterval(() => {
-      p += Math.random() * 18
-      if (p >= 90) { clearInterval(id); onDone(); return }
-      setUpload((prev) => ({ ...prev, progress: Math.min(Math.round(p), 90) }))
-    }, 120)
-    return id
-  }
+  // ✅ publicId lives only here — extracted from URL, never sent anywhere
+  const publicIdRef = useRef<string>("")
+
+  // Initialise upload state when a value already exists (e.g. edit mode)
+  useEffect(() => {
+    if (value && upload.status === "idle") {
+      publicIdRef.current = extractPublicId(value) ?? ""
+      setUpload({ status: "success", progress: 100, fileName: "Current image", errorMsg: "" })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
 
   const handleFile = async (file: File) => {
     if (file.size > MAX_MB * 1024 * 1024) {
       setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: `File too large — max ${MAX_MB}MB` })
       return
     }
+    const ext = file.name.split(".").pop()?.toLowerCase()
+    if (!ext || !ACCEPTED_EXTS.includes(ext)) {
+      setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: "Invalid format — use JPG, PNG, WebP, or AVIF" })
+      return
+    }
 
-    setUpload({ status: "uploading", progress: 0, fileName: file.name, errorMsg: "" })
-
-    let progressTimer: ReturnType<typeof setInterval> | undefined
+    setUpload({ status: "uploading", progress: 5, fileName: file.name, errorMsg: "" })
+    const progressInterval = setInterval(() => {
+      setUpload((p) => ({ ...p, progress: Math.min(p.progress + Math.random() * 15, 85) }))
+    }, 200)
 
     try {
-      // ── Step 1: Ask server for presigned POST URL ──────────────
-      setUpload((p) => ({ ...p, progress: 10 }))
-
-      const prepRes = await fetch("/api/upload/prepare", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          fileName: file.name,
-          fileType: file.type,
-          fileSize: file.size,
-        }),
-      })
-
-      if (!prepRes.ok) {
-        const err = await prepRes.json().catch(() => ({}))
-        throw new Error(err.error ?? "Failed to prepare upload")
+      // ✅ Delete old image using client-only publicId before uploading new one
+      if (publicIdRef.current) {
+        await deleteCloudinaryImage(publicIdRef.current).catch(() => {})
+        publicIdRef.current = ""
       }
 
-      const { url, fields, key, viewUrl } = await prepRes.json()
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch("/api/upload/server", { method: "POST", body: formData })
+      clearInterval(progressInterval)
 
-      // ── Step 2: Client uploads directly to Railway bucket ──────
-      setUpload((p) => ({ ...p, progress: 25 }))
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Upload failed")
 
-      progressTimer = setInterval(() => {
-        setUpload((p) => {
-          const next = Math.min(p.progress + Math.random() * 15, 90)
-          return { ...p, progress: Math.round(next) }
-        })
-      }, 200)
+      const newUrl: string = data.secure_url || data.url
+      // ✅ Store publicId client-side only
+      publicIdRef.current = data.public_id || extractPublicId(newUrl) || ""
 
-      const form = new FormData()
-      Object.entries(fields as Record<string, string>).forEach(([k, v]) => form.append(k, v))
-      form.append("Content-Type", file.type)
-      form.append("file", file)
-
-      const uploadRes = await fetch(url, { method: "POST", body: form })
-      clearInterval(progressTimer)
-
-      if (!uploadRes.ok && uploadRes.status !== 204) {
-        const text = await uploadRes.text()
-        throw new Error(`Upload failed (${uploadRes.status}): ${text.slice(0, 120)}`)
-      }
-
-      // ── Step 3: viewUrl is already a working presigned GET URL ──
-      // Store this directly in DB — <img src={viewUrl} /> works immediately
       setUpload({ status: "success", progress: 100, fileName: file.name, errorMsg: "" })
-      onChange(viewUrl)
-
+      onChange(newUrl) // only the URL goes up to the form
     } catch (err: any) {
-      if (progressTimer) clearInterval(progressTimer)
-      setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: err.message ?? "Upload failed" })
+      clearInterval(progressInterval)
+      setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: err.message || "Upload failed. Please try again." })
     }
   }
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    const file = e.dataTransfer.files[0]
-    if (file) handleFile(file)
-  }
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) handleFile(file)
-  }
-
-  const clear = () => {
+  // ✅ Delete from Cloudinary using client-side publicId, then clear state
+  const clear = async () => {
+    if (publicIdRef.current) {
+      await deleteCloudinaryImage(publicIdRef.current).catch(() => {})
+      publicIdRef.current = ""
+    }
     setUpload(EMPTY_UPLOAD)
     onChange("")
     if (inputRef.current) inputRef.current.value = ""
   }
 
-  return (
-    <div className="space-y-3">
+  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(true) }, [])
+  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(false) }, [])
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file) handleFile(file)
+  }, [])
 
-      {/* Tab switcher */}
-      <div className="flex rounded-lg border border-white/[0.08] bg-[#0a0a0f] p-0.5 w-fit">
+  const copyUrl = () => { if (value) navigator.clipboard.writeText(value).catch(() => {}) }
+
+  return (
+    <div className="space-y-4">
+      {/* Tabs */}
+      <div className="inline-flex rounded-xl border border-white/[0.06] bg-[#0e0e16] p-1">
         {(["upload", "url"] as const).map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
-              tab === t
-                ? "bg-purple-500/20 text-purple-300"
-                : "text-[#8884a0] hover:text-[#f0eeff]"
-            }`}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-medium transition-all
+              ${tab === t ? "bg-purple-500/15 text-purple-300" : "text-[#555570] hover:text-[#a0a0b8]"}`}
           >
-            {t === "upload" ? <Upload className="h-3 w-3" /> : <Link2 className="h-3 w-3" />}
-            {t === "upload" ? "Upload File" : "Paste URL"}
+            {t === "upload" ? <Upload className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
+            {t === "upload" ? "Upload" : "URL"}
           </button>
         ))}
       </div>
 
-      {/* Upload tab */}
+      {/* Upload Tab */}
       {tab === "upload" && (
-        <div>
-          {/* Drop zone */}
-          {upload.status === "idle" && (
+        <div className="space-y-4">
+          {(upload.status === "idle" || upload.status === "error") && (
             <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              onDragOver={(e) => e.preventDefault()}
               onClick={() => inputRef.current?.click()}
-              className={`group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-8 transition-all ${
-                error
-                  ? "border-red-500/40 bg-red-500/5"
-                  : "border-white/[0.12] bg-[#0a0a0f] hover:border-purple-500/40 hover:bg-purple-500/5"
-              }`}
+              className={`group relative cursor-pointer rounded-2xl border-2 border-dashed p-8 transition-all
+                ${isDragging ? "border-purple-500/50 bg-purple-500/5 scale-[1.02]"
+                  : error ? "border-red-500/30 bg-red-500/[0.02]"
+                  : "border-white/[0.08] bg-[#0e0e16] hover:border-purple-500/30 hover:bg-purple-500/[0.02]"}`}
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.1] bg-white/[0.04] transition-all group-hover:border-purple-500/40 group-hover:bg-purple-500/10">
-                <ImageIcon className="h-5 w-5 text-[#8884a0] group-hover:text-purple-400" />
-              </div>
-              <div className="text-center">
-                <p className="text-sm font-medium text-[#f0eeff]">
-                  Drop image here or <span className="text-purple-400">browse</span>
-                </p>
-                <p className="mt-0.5 text-[11px] text-[#8884a0]">
-                  JPG, PNG, WebP · max {MAX_MB}MB
-                </p>
-              </div>
               <input
                 ref={inputRef}
                 type="file"
-                accept={ACCEPTED}
+                accept={ACCEPTED_TYPES}
                 className="hidden"
-                onChange={handleInputChange}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
               />
+              <div className="flex flex-col items-center gap-3 text-center">
+                <div className={`flex h-14 w-14 items-center justify-center rounded-2xl border transition-all
+                  ${isDragging ? "border-purple-500/30 bg-purple-500/10"
+                    : "border-white/[0.06] bg-white/[0.02] group-hover:border-purple-500/20 group-hover:bg-purple-500/5"}`}
+                >
+                  <Upload className={`h-6 w-6 transition-colors ${isDragging ? "text-purple-400" : "text-[#555570] group-hover:text-purple-400"}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-[#f0eeff]">
+                    {isDragging ? "Drop image here" : <><span>Drop image or </span><span className="text-purple-400">click to browse</span></>}
+                  </p>
+                  <p className="mt-1 text-[11px] text-[#555570]">JPG, PNG, WebP, AVIF · Max {MAX_MB}MB</p>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* Uploading state */}
           {upload.status === "uploading" && (
-            <div className="rounded-xl border border-white/[0.08] bg-[#0a0a0f] p-4 space-y-3">
+            <div className="rounded-2xl border border-white/[0.06] bg-[#0e0e16] p-6 space-y-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg border border-white/[0.08] bg-[#14141c] flex items-center justify-center">
-                    <Upload className="h-3.5 w-3.5 text-purple-400 animate-bounce" />
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
+                    <Loader2 className="h-5 w-5 text-purple-400 animate-spin" />
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-[#f0eeff] truncate max-w-[180px]">{upload.fileName}</p>
-                    <p className="text-[11px] text-[#8884a0]">Uploading to Railway...</p>
+                    <p className="text-sm font-medium text-[#f0eeff]">{upload.fileName}</p>
+                    <p className="text-xs text-[#555570]">Uploading to cloud...</p>
                   </div>
                 </div>
-                <span className="text-xs font-semibold text-purple-400">{upload.progress}%</span>
+                <span className="text-sm font-semibold text-purple-400">{Math.round(upload.progress)}%</span>
               </div>
-              {/* Progress bar */}
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-white/[0.04]">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-purple-600 to-violet-500 transition-all duration-200"
+                  className="h-full rounded-full bg-gradient-to-r from-purple-600 to-violet-500 transition-all duration-300 ease-out"
                   style={{ width: `${upload.progress}%` }}
                 />
               </div>
             </div>
           )}
 
-          {/* Success state */}
           {upload.status === "success" && value && (
-            <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
-              <div className="flex items-center gap-3">
-                {/* Thumbnail */}
-                <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-white/[0.08] bg-[#0e0e16]">
-                  <img
-                    src={value}
-                    alt="uploaded"
-                    className="h-full w-full object-contain p-1"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                    <p className="text-xs font-semibold text-emerald-300">Uploaded successfully</p>
-                  </div>    
-                  <p className="mt-0.5 text-[10px] text-[#8884a0] truncate">{upload.fileName}</p>
-                  <p className="mt-0.5 text-[10px] text-[#8884a0]/60 truncate">{value}</p>
-                </div>
+            <div className="rounded-2xl border border-emerald-500/20 bg-[#0e0e16] overflow-hidden">
+              <div className="relative aspect-[4/3] bg-[#0a0a0f]">
+                <img
+                  src={value}
+                  alt="Phone preview"
+                  className="h-full w-full object-contain p-6"
+                  onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.jpg" }}
+                />
+                {/* ✅ X button — triggers client-side Cloudinary delete, no backend involved */}
                 <button
                   type="button"
                   onClick={clear}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] text-[#8884a0] transition-all hover:border-red-500/40 hover:text-red-400"
+                  className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/70 backdrop-blur-sm transition-all hover:bg-red-500/80 hover:text-white"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* Error state */}
-          {upload.status === "error" && (
-            <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-                  <div>
-                    <p className="text-xs font-semibold text-red-300">Upload failed</p>
-                    <p className="text-[11px] text-[#8884a0]">{upload.errorMsg}</p>
-                  </div>
+              <div className="flex items-center gap-3 border-t border-white/[0.04] px-4 py-3">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-emerald-300">Upload complete</p>
+                  <p className="text-[11px] text-[#555570] truncate">{upload.fileName}</p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => { setUpload(EMPTY_UPLOAD); if (inputRef.current) inputRef.current.value = "" }}
-                  className="text-[11px] text-purple-400 hover:text-purple-300 underline underline-offset-2 whitespace-nowrap"
+                  onClick={copyUrl}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] px-2.5 py-1.5 text-[11px] text-[#a0a0b8] transition-all hover:border-purple-500/30 hover:text-purple-300"
                 >
-                  Try again
+                  <Copy className="h-3 w-3" />
+                  Copy URL
+                </button>
+                <button
+                  type="button"
+                  onClick={clear}
+                  className="flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-1.5 text-[11px] text-red-400 transition-all hover:bg-red-500/10"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Remove
+                </button>
+              </div>
+            </div>
+          )}
+
+          {upload.status === "error" && (
+            <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.03] p-5">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-300">Upload failed</p>
+                  <p className="text-xs text-[#555570] mt-1">{upload.errorMsg}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUpload(EMPTY_UPLOAD)}
+                  className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                >
+                  Retry
                 </button>
               </div>
             </div>
@@ -330,49 +486,45 @@ function ImageUpload({
         </div>
       )}
 
-      {/* URL tab */}
+      {/* URL Tab */}
       {tab === "url" && (
-        <div className="space-y-2">
-          <input
-            type="url"
+        <div className="space-y-4">
+          <Input
             value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="https://example.com/iphone-15-pro.jpg"
-            className="w-full rounded-lg border border-white/[0.1] bg-[#0a0a0f] px-3 py-2.5 text-sm text-[#f0eeff] placeholder-[#8884a0] outline-none transition-all focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20"
+            onChange={(v) => {
+              // ✅ Extract publicId client-side when user pastes a Cloudinary URL
+              publicIdRef.current = extractPublicId(v) ?? ""
+              onChange(v)
+            }}
+            placeholder="https://cdn.example.com/phone-image.png"
+            icon={Link2}
           />
-          {/* URL preview */}
-          {value && tab === "url" && (
-            <div className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-[#0a0a0f] p-3">
-              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-white/[0.08] bg-[#0e0e16]">
+          {value && (
+            <div className="rounded-2xl border border-white/[0.06] bg-[#0e0e16] overflow-hidden">
+              <div className="relative aspect-[4/3] bg-[#0a0a0f]">
                 <img
                   src={value}
-                  alt="preview"
-                  className="h-full w-full object-contain p-1"
+                  alt="URL preview"
+                  className="h-full w-full object-contain p-6"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
                 />
+                <button
+                  type="button"
+                  onClick={clear}
+                  className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/70 backdrop-blur-sm transition-all hover:bg-red-500/80 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] text-[#8884a0]/60 truncate">{value}</p>
-                <p className="text-[11px] text-[#8884a0] mt-0.5">URL preview</p>
+              <div className="border-t border-white/[0.04] px-4 py-2.5">
+                <p className="text-[11px] text-[#555570] truncate">{value}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => onChange("")}
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#8884a0] hover:text-red-400"
-              >
-                <X className="h-3 w-3" />
-              </button>
             </div>
           )}
         </div>
       )}
 
-      {/* Field error */}
-      {error && (
-        <p className="flex items-center gap-1.5 text-[11px] text-red-400">
-          <AlertCircle className="h-3 w-3" /> {error}
-        </p>
-      )}
+      {error && <p className="text-[11px] text-red-400">{error}</p>}
     </div>
   )
 }
@@ -382,235 +534,204 @@ interface PhoneFormProps {
   initialData?: Partial<PhoneFormData>
   onSubmit: (data: PhoneFormData) => Promise<{ ok: boolean; message: string }>
   mode?: "create" | "edit"
+  isSubmitting?: boolean
 }
 
-export function PhoneForm({ initialData, onSubmit, mode = "create" }: PhoneFormProps) {
-  const [data, setData]         = useState<PhoneFormData>({ ...EMPTY, ...initialData })
-  const [errors, setErrors]     = useState<Errors>({})
-  const [loading, setLoading]   = useState(false)
-  const [alert, setAlert]       = useState<{ type: "success" | "error"; message: string } | null>(null)
+export function PhoneForm({ initialData, onSubmit, mode = "create", isSubmitting = false }: PhoneFormProps) {
+  const [data, setData] = useState<PhoneFormData>({ ...EMPTY, ...initialData })
+  const [errors, setErrors] = useState<Partial<Record<keyof PhoneFormData, string>>>({})
   const [slugLocked, setSlugLocked] = useState(mode === "edit")
+  const [touched, setTouched] = useState<Set<string>>(new Set())
 
-  // Auto-generate slug from name in create mode
   useEffect(() => {
-    if (!slugLocked && data.name) {
-      setData((p) => ({ ...p, slug: toSlug(data.name) }))
-    }
-  }, [data.name, slugLocked])
+    if (initialData) setData((prev) => ({ ...prev, ...initialData }))
+  }, [initialData])
 
-  const set = <K extends keyof PhoneFormData>(k: K, v: PhoneFormData[K]) => {
-    setData((p) => ({ ...p, [k]: v }))
+  const setField = <K extends keyof PhoneFormData>(k: K, v: PhoneFormData[K]) => {
+    setData((p) => {
+      const next = { ...p, [k]: v }
+      if (k === "name" && !slugLocked) next.slug = toSlug(v as string)
+      return next
+    })
+    setTouched((prev) => new Set(prev).add(k))
     if (errors[k]) setErrors((p) => ({ ...p, [k]: undefined }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const errs = validate(data)
+    setTouched(new Set(Object.keys(data)))
+
+    const errs = validate(data, mode)
     if (Object.keys(errs).length) {
       setErrors(errs)
-      // Scroll to first error
-      document.querySelector("[data-error]")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      document.querySelector("[data-error='true']")?.scrollIntoView({ behavior: "smooth", block: "center" })
       return
     }
-    setLoading(true)
-    setAlert(null)
-    try {
-      const res = await onSubmit(data)
-      setAlert({ type: res.ok ? "success" : "error", message: res.message })
-      if (res.ok && mode === "create") {
-        setData(EMPTY)
-        setErrors({})
-        window.scrollTo({ top: 0, behavior: "smooth" })
-      }
-    } finally {
-      setLoading(false)
+
+    // ✅ data contains no imagePublicId — clean payload goes to backend
+    const res = await onSubmit(data)
+    if (res.ok && mode === "create") {
+      setData(EMPTY)
+      setErrors({})
+      setTouched(new Set())
     }
   }
 
+  const showError = (field: keyof PhoneFormData) => touched.has(field) ? errors[field] : undefined
+
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-8">
-
-      {alert && <Alert type={alert.type} message={alert.message} />}
-
-      {/* ── Identity ── */}
-      <FormSection title="Identity">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Phone Name" required error={errors.name}>
-            <TextInput
-              value={data.name}
-              onChange={(v) => set("name", v)}
-              placeholder="e.g. iPhone 15 Pro"
-            />
-          </Field>
-          <Field label="Brand" required error={errors.brand}>
-            <TextInput
-              value={data.brand}
-              onChange={(v) => set("brand", v)}
-              placeholder="e.g. Apple"
-            />
-          </Field>
+    <form onSubmit={handleSubmit} noValidate className="space-y-6">
+      {/* ── Identity Section ── */}
+      <Section title="Basic Information" icon={Smartphone}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div data-error={!!showError("name")}>
+            <Label required>Phone Name</Label>
+            <Input value={data.name} onChange={(v) => setField("name", v)} placeholder="iPhone 15 Pro Max" error={showError("name")} icon={Smartphone} />
+          </div>
+          <div data-error={!!showError("brand")}>
+            <Label required>Brand</Label>
+            <Input value={data.brand} onChange={(v) => setField("brand", v)} placeholder="Apple" error={showError("brand")} />
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Slug" required error={errors.slug} hint="Auto-generated from name">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div data-error={!!showError("slug")}>
+            <Label required hint={mode === "create" ? "Auto-generated" : undefined}>Slug</Label>
             <div className="relative">
-              <TextInput
+              <Input
                 value={data.slug}
-                onChange={(v) => {
-                  setSlugLocked(true)
-                  set("slug", v.toLowerCase().replace(/[^a-z0-9-]/g, ""))
-                }}
-                placeholder="iphone-15-pro"
+                onChange={(v) => { setSlugLocked(true); setField("slug", v.toLowerCase().replace(/[^a-z0-9-]/g, "")) }}
+                placeholder="iphone-15-pro-max"
+                error={showError("slug")}
               />
               {mode === "create" && (
                 <button
                   type="button"
-                  onClick={() => { setSlugLocked(false); set("slug", toSlug(data.name)) }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-purple-400/70 hover:text-purple-400 transition-colors"
+                  onClick={() => { setSlugLocked(false); setField("slug", toSlug(data.name)) }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-purple-400/60 hover:text-purple-400 transition-colors"
                 >
-                  ↺ auto
+                  Auto
                 </button>
               )}
             </div>
-          </Field>
-          <Field label="Model Number" required error={errors.model}>
-            <TextInput
-              value={data.model}
-              onChange={(v) => set("model", v)}
-              placeholder="e.g. A3104"
-            />
-          </Field>
+          </div>
+          <div data-error={!!showError("model")}>
+            <Label required>Model Number</Label>
+            <Input value={data.model} onChange={(v) => setField("model", v)} placeholder="A3108" error={showError("model")} />
+          </div>
         </div>
 
-        <Field label="Release Date" required error={errors.release_date}>
-          <TextInput
-            type="date"
-            value={data.release_date}
-            onChange={(v) => set("release_date", v)}
-          />
-        </Field>
-      </FormSection>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div data-error={!!showError("release_date")}>
+            <Label required>Release Date</Label>
+            <Input type="date" value={data.release_date} onChange={(v) => setField("release_date", v)} error={showError("release_date")} icon={Calendar} />
+          </div>
+          <div data-error={!!showError("battery")}>
+            <Label required>Battery Capacity</Label>
+            <Input value={data.battery} onChange={(v) => setField("battery", v)} placeholder="4441mAh" error={showError("battery")} icon={Battery} />
+          </div>
+        </div>
+      </Section>
 
-      {/* ── Media ── */}
-      <FormSection title="Media">
-        <Field label="Phone Image" required error={errors.image}>
+      {/* ── Media Section ── */}
+      <Section title="Product Image" icon={ImageIcon}>
+        <div data-error={!!showError("image")}>
+          <Label required={mode === "create"}>Phone Image</Label>
+          {/* ✅ No publicId prop — ImageUpload manages it internally */}
           <ImageUpload
             value={data.image}
-            onChange={(url) => set("image", url)}
-            error={errors.image}
+            onChange={(v) => setField("image", v)}
+            error={showError("image")}
           />
-        </Field>
-      </FormSection>
-
-      {/* ── Display ── */}
-      <FormSection title="Display">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Screen Size" error={errors.screen_size} hint='e.g. "6.1 inches"'>
-            <TextInput
-              value={data.screen_size}
-              onChange={(v) => set("screen_size", v)}
-              placeholder="6.1 inches"
-            />
-          </Field>
-          <Field label="Screen Resolution" error={errors.screen_resolution} hint='e.g. "2556 × 1179"'>
-            <TextInput
-              value={data.screen_resolution}
-              onChange={(v) => set("screen_resolution", v)}
-              placeholder="2556 × 1179"
-            />
-          </Field>
         </div>
-      </FormSection>
+      </Section>
 
-      {/* ── Hardware ── */}
-      <FormSection title="Hardware">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="RAM" error={errors.ram}>
-            <SelectInput
-              value={data.ram}
-              onChange={(v) => set("ram", v)}
-              options={RAM_OPTIONS}
-              placeholder="Select RAM"
-            />
-          </Field>
-          <Field label="Storage" error={errors.storage}>
-            <SelectInput
-              value={data.storage}
-              onChange={(v) => set("storage", v)}
-              options={STORAGE_OPTIONS}
-              placeholder="Select Storage"
-            />
-          </Field>
+      {/* ── Display Section ── */}
+      <Section title="Display" icon={Monitor}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <Label>Screen Size</Label>
+            <Input value={data.screen_size} onChange={(v) => setField("screen_size", v)} placeholder='6.7"' />
+          </div>
+          <div>
+            <Label>Resolution</Label>
+            <Input value={data.screen_resolution} onChange={(v) => setField("screen_resolution", v)} placeholder="1290 x 2796" />
+          </div>
         </div>
-        <Field label="Battery" required error={errors.battery} hint='e.g. "3274mAh"'>
-          <TextInput
-            value={data.battery}
-            onChange={(v) => set("battery", v)}
-            placeholder="3274mAh"
-          />
-        </Field>
-      </FormSection>
+      </Section>
 
-      {/* ── Camera ── */}
-      <FormSection title="Camera">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Main Camera" error={errors.main_camera} hint='e.g. "48MP + 12MP + 12MP"'>
-            <TextInput
-              value={data.main_camera}
-              onChange={(v) => set("main_camera", v)}
-              placeholder="48MP + 12MP + 12MP"
-            />
-          </Field>
-          <Field label="Selfie Camera" error={errors.selfie_camera} hint='e.g. "12MP"'>
-            <TextInput
-              value={data.selfie_camera}
-              onChange={(v) => set("selfie_camera", v)}
-              placeholder="12MP"
-            />
-          </Field>
+      {/* ── Hardware Section ── */}
+      <Section title="Hardware" icon={HardDrive}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div>
+            <Label>RAM</Label>
+            <Select value={data.ram} onChange={(v) => setField("ram", v)} options={RAM_OPTIONS} placeholder="Select RAM" />
+          </div>
+          <div>
+            <Label>Storage</Label>
+            <Select value={data.storage} onChange={(v) => setField("storage", v)} options={STORAGE_OPTIONS} placeholder="Select Storage" />
+          </div>
+          <div>
+            <Label hint="Optional">USB-C PD</Label>
+            <Input value={data.battery} onChange={(v) => setField("battery", v)} placeholder="25W" />
+          </div>
         </div>
-      </FormSection>
+      </Section>
+
+      {/* ── Camera Section ── */}
+      <Section title="Camera" icon={Camera}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <Label>Main Camera</Label>
+            <Input value={data.main_camera} onChange={(v) => setField("main_camera", v)} placeholder="48MP + 12MP + 12MP" />
+          </div>
+          <div>
+            <Label>Selfie Camera</Label>
+            <Input value={data.selfie_camera} onChange={(v) => setField("selfie_camera", v)} placeholder="12MP" />
+          </div>
+        </div>
+      </Section>
 
       {/* ── Colors & Features ── */}
-      <FormSection title="Colors & Features">
-        <Field
-          label="Colors"
-          required
-          error={errors.colors}
-          hint="Type a color name and press Enter or comma to add"
-        >
-          <TagInput
-            values={data.colors}
-            onChange={(v) => set("colors", v)}
-            placeholder="Black Titanium, White Titanium..."
-          />
-        </Field>
-        <Field
-          label="Features"
-          hint="Type a feature and press Enter or comma to add"
-        >
-          <TagInput
-            values={data.features}
-            onChange={(v) => set("features", v)}
-            placeholder="5G Connectivity, Face ID, Wireless Charging..."
-          />
-        </Field>
-      </FormSection>
+      <Section title="Colors & Features" icon={Palette}>
+        <div data-error={!!showError("colors")}>
+          <Label required>Colors</Label>
+          <TagInput values={data.colors} onChange={(v) => setField("colors", v)} placeholder="Type color and press Enter..." />
+          {showError("colors") && <p className="mt-1.5 text-[11px] text-red-400">{showError("colors")}</p>}
+        </div>
+        <div>
+          <Label>Features</Label>
+          <TagInput values={data.features} onChange={(v) => setField("features", v)} placeholder="5G, Face ID, Wireless Charging..." />
+        </div>
+      </Section>
 
-      {/* ── Actions ── */}
-      <div className="flex items-center justify-between border-t border-white/[0.06] pt-6">
+      {/* ── Submit ── */}
+      <div className="flex items-center justify-between pt-4">
         <button
           type="button"
-          onClick={() => { setData({ ...EMPTY, ...initialData }); setErrors({}) }}
-          className="text-sm text-[#8884a0] transition-colors hover:text-[#f0eeff]"
+          onClick={() => {
+            if (confirm("Reset all fields?")) {
+              setData({ ...EMPTY, ...initialData })
+              setErrors({})
+              setTouched(new Set())
+            }
+          }}
+          className="text-sm text-[#555570] hover:text-[#a0a0b8] transition-colors"
         >
           Reset form
         </button>
-        <SubmitButton
-          loading={loading}
-          label={mode === "create" ? "Add Phone" : "Save Changes"}
-          loadingLabel={mode === "create" ? "Adding..." : "Saving..."}
-        />
+
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-2.5 text-sm font-medium text-white transition-all hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSubmitting ? (
+            <><Loader2 className="h-4 w-4 animate-spin" />{mode === "create" ? "Adding..." : "Saving..."}</>
+          ) : (
+            <><Sparkles className="h-4 w-4" />{mode === "create" ? "Add Phone" : "Save Changes"}</>
+          )}
+        </button>
       </div>
     </form>
   )

@@ -4,11 +4,11 @@
 "use client"
 
 import { useState } from "react"
-import { X, Plus } from "lucide-react"
+import { X } from "lucide-react"
 
 // ─── Shared styles ────────────────────────────────────────────
 export const inputCls =
-  "w-full rounded-lg border border-white/[0.1] bg-[#0a0a0f] px-3 py-2.5 text-sm text-[#f0eeff] placeholder-[#8884a0] outline-none transition-all focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 disabled:opacity-40"
+  "w-full rounded-lg border border-white/10 bg-[#0a0a0f] px-3 py-2.5 text-sm text-[#f0eeff] placeholder-[#8884a0] outline-none transition-all focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 disabled:opacity-40"
 
 export const labelCls =
   "mb-1.5 block text-xs font-semibold uppercase tracking-[0.1em] text-[#8884a0]"
@@ -134,7 +134,7 @@ export function TagInput({
   }
 
   return (
-    <div className="min-h-[44px] w-full cursor-text rounded-lg border border-white/[0.1] bg-[#0a0a0f] px-2.5 py-2 transition-all focus-within:border-purple-500/50 focus-within:ring-1 focus-within:ring-purple-500/20">
+    <div className="min-h-11 w-full cursor-text rounded-lg border border-white/10 bg-[#0a0a0f] px-2.5 py-2 transition-all focus-within:border-purple-500/50 focus-within:ring-1 focus-within:ring-purple-500/20">
       <div className="flex flex-wrap gap-1.5">
         {values.map((tag) => (
           <span
@@ -158,7 +158,7 @@ export function TagInput({
           onKeyDown={handleKey}
           onBlur={add}
           placeholder={values.length === 0 ? placeholder : ""}
-          className="min-w-[120px] flex-1 bg-transparent text-sm text-[#f0eeff] placeholder-[#8884a0] outline-none"
+          className="min-w-30 flex-1 bg-transparent text-sm text-[#f0eeff] placeholder-[#8884a0] outline-none"
         />
       </div>
     </div>
@@ -177,7 +177,7 @@ export function FormSection({
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-purple-400">{title}</p>
-        <div className="h-px flex-1 bg-white/[0.06]" />
+        <div className="h-px flex-1 bg-white/6" />
       </div>
       {children}
     </div>
@@ -198,7 +198,7 @@ export function SubmitButton({
     <button
       type="submit"
       disabled={loading}
-      className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-violet-600 px-6 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+      className="inline-flex items-center gap-2 rounded-lg bg-linear-to-r from-purple-600 to-violet-600 px-6 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
     >
       {loading && (
         <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />

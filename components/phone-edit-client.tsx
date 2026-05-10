@@ -16,7 +16,7 @@ interface PhoneEditClientProps {
 
 // ─── Map PhoneAPI → PhoneFormData ─────────────────────────────
 // PhoneAPI has id + all fields; PhoneFormData is the same minus id
-function mapToFormData(p: PhoneAPI): PhoneFormData {
+function mapToFormData(p: PhoneAPI): PhoneFormData | any {
   return {
     name:              p.name,
     brand:             p.brand,
@@ -79,7 +79,7 @@ export function PhoneEditClient({ phone }: PhoneEditClientProps) {
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-[#8884a0] transition-all hover:border-purple-500/40 hover:text-purple-400"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/8 text-[#8884a0] transition-all hover:border-purple-500/40 hover:text-purple-400"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -101,14 +101,14 @@ export function PhoneEditClient({ phone }: PhoneEditClientProps) {
           <Link
             href={`/phones/${phone.slug}`}
             target="_blank"
-            className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-[#8884a0] transition-all hover:border-purple-500/40 hover:text-purple-400"
+            className="flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-1.5 text-xs text-[#8884a0] transition-all hover:border-purple-500/40 hover:text-purple-400"
           >
             <ExternalLink className="h-3 w-3" />
             View on site
           </Link>
           <Link
             href="/phones"
-            className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-[#8884a0] transition-all hover:border-white/20 hover:text-[#f0eeff]"
+            className="flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-1.5 text-xs text-[#8884a0] transition-all hover:border-white/20 hover:text-[#f0eeff]"
           >
             ← All phones
           </Link>
@@ -116,13 +116,13 @@ export function PhoneEditClient({ phone }: PhoneEditClientProps) {
       </div>
 
       {/* ── Phone meta strip ── */}
-      <div className="flex items-center gap-4 rounded-xl border border-white/[0.06] bg-[#14141c] p-4">
-        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/[0.08] bg-[#0e0e16]">
+      <div className="flex items-center gap-4 rounded-xl border border-white/6 bg-[#14141c] p-4">
+        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/8 bg-[#0e0e16]">
           <img
             src={phone.image}
             alt={phone.name}
             className="h-full w-full object-contain p-1.5"
-            onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.jpg" }}
+            // onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.jpg" }}
           />
         </div>
         <div className="flex flex-wrap gap-x-6 gap-y-1">
@@ -144,7 +144,7 @@ export function PhoneEditClient({ phone }: PhoneEditClientProps) {
       </div>
 
       {/* ── Form ── */}
-      <div className="rounded-2xl border border-white/[0.08] bg-[#14141c] p-6">
+      <div className="rounded-2xl border border-white/8 bg-[#14141c] p-6">
         <PhoneForm
           mode="edit"
           initialData={mapToFormData(phone)}

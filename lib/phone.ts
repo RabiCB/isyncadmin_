@@ -2,6 +2,8 @@
 // types/phone.ts  — single source of truth for phone data shapes
 // ─────────────────────────────────────────────────────────────
 
+import { extractPublicId } from "./cloudinary"
+
 /** Raw shape returned by the API */
 export interface PhoneAPI {
   id: number
@@ -47,6 +49,7 @@ export function mapPhoneAPIToDetail(data: PhoneAPI): PhoneDetail {
     model:       data.model,
     image:       data.image,
     colors:      data.colors,
+   
     storage:     data.storage,
     features:    data.features,
     releaseDate: new Date(data.release_date).toLocaleDateString("en-US", {

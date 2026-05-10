@@ -1,27 +1,20 @@
-// app/admin/layout.tsx  — Admin shell layout
-// Minimal dark sidebar + top bar shared by all /admin/* pages
+import { ReactQueryProvider } from "@/components/react-query-provider"
+import { LayoutClient } from "./layout-client"
+import "./globals.css"
 
-import Link from "next/link"
-import { Smartphone, LayoutDashboard, Laptop, Volume2, Watch, Gamepad2, Settings, ChevronRight } from "lucide-react"
-import "./globals.css"  // ← must be here
-const SIDEBAR_LINKS = [
-  { label: "Dashboard",  href: "/admin",                icon: LayoutDashboard },
-  { label: "Phones",     href: "/admin/phones",         icon: Smartphone      },
-  { label: "Laptops",    href: "/admin/laptops",        icon: Laptop          },
-  { label: "Speakers",   href: "/admin/speakers",       icon: Volume2         },
-  { label: "Wearables",  href: "/admin/wearables",      icon: Watch           },
-  { label: "Gaming",     href: "/admin/gaming",         icon: Gamepad2        },
-  { label: "Settings",   href: "/admin/settings",       icon: Settings        },
-]
+export const metadata = {
+  title: "Gadget Hub Admin",
+  description: "Admin panel for managing gadgets",
+}
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-      <html lang="en" className="h-full bg-[#0a0a0f] m-5 text-[#f0eeff]">
-        <body>{children}</body>
-    
- 
-      </html>
-    
+    <html lang="en" className="h-full bg-[#0a0a0f] text-[#f0eeff]">
+      <body>
+        <ReactQueryProvider>
+          <LayoutClient>{children}</LayoutClient>
+        </ReactQueryProvider>
+      </body>
+    </html>
   )
 }

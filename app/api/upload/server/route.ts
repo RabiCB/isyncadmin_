@@ -1,41 +1,49 @@
-// app/api/upload/serve/route.ts
-// Step 2 — Given a stored key, return a presigned GET URL for reading
-// Files served directly from Railway bucket — zero service egress
-// Usage: GET /api/upload/serve?key=phones/1234-abc.jpg
-
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { NextRequest, NextResponse } from "next/server"
+import { v2 as cloudinary } from "cloudinary"
 
-const s3 = new S3Client({
-  region:   process.env.AWS_REGION ?? "auto",
-  endpoint: process.env.RAILWAY_BUCKET_ENDPOINT_URL!,
-  credentials: {
-    accessKeyId:     process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
-  forcePathStyle: true,
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME!,
+  api_key: process.env.CLOUDINARY_API_KEY!,
+  api_secret: process.env.CLOUDINARY_API_SECRET!,
 })
 
-export async function GET(req: NextRequest) {
-  const key = req.nextUrl.searchParams.get("key")
-  if (!key) return NextResponse.json({ error: "Missing key" }, { status: 400 })
+console.log("Cloudinary configured with cloud name:", process.env.CLOUDINARY_CLOUD_NAME, "and API key:", process.env.CLOUDINARY_API_KEY )
 
+export async function POST(req: NextRequest) {
   try {
-    // Generate presigned URL valid for 7 days (max 90 days on Railway)
-    const presignedUrl = await getSignedUrl(
-      s3,
-      new GetObjectCommand({
-        Bucket: process.env.RAILWAY_BUCKET_NAME!,
-        Key:    key,
-      }),
-      { expiresIn: 60 * 60 * 24 * 7 } // 7 days
-    )
+    const formData = await req.formData()
+    const file = formData.get("file") as File
 
-    // Redirect to presigned URL — file served directly from bucket (no egress)
-    return NextResponse.redirect(presignedUrl, 302)
+    if (!file) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 })
+    }
+
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+
+    const result: any = await new Promise((resolve, reject) => {
+      cloudinary.uploader
+        .upload_stream(
+          {
+            folder: "image", // change if needed
+          },
+          (err, res) => {
+            if (err) reject(err)
+            else resolve(res)
+          }
+        )
+        .end(buffer)
+    })
+
+    return NextResponse.json({
+      url: result.secure_url,
+      public_id: result.public_id,
+    })
   } catch (err: any) {
-    console.error("[serve] error:", err)
-    return NextResponse.json({ error: "Could not generate URL" }, { status: 500 })
+    console.error("[cloudinary upload error]", err)
+    return NextResponse.json(
+      { error: "Upload failed" },
+      { status: 500 }
+    )
   }
 }
