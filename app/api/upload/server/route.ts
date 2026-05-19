@@ -7,8 +7,6 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET!,
 })
 
-console.log("Cloudinary configured with cloud name:", process.env.CLOUDINARY_CLOUD_NAME, "and API key:", process.env.CLOUDINARY_API_KEY )
-
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
@@ -25,7 +23,10 @@ export async function POST(req: NextRequest) {
       cloudinary.uploader
         .upload_stream(
           {
-            folder: "image", // change if needed
+            folder: "image",
+            background_removal: "cloudinary_ai", // uses Cloudinary's built-in AI
+            // OR use: background_removal: "remove_bg"  ← if you have the remove.bg add-on
+            format: "png", // must be PNG to preserve transparency
           },
           (err, res) => {
             if (err) reject(err)
@@ -41,9 +42,6 @@ export async function POST(req: NextRequest) {
     })
   } catch (err: any) {
     console.error("[cloudinary upload error]", err)
-    return NextResponse.json(
-      { error: "Upload failed" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Upload failed" }, { status: 500 })
   }
 }

@@ -1,13 +1,12 @@
+// components/laptop-form.tsx
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import {
   Upload, X, CheckCircle2, AlertCircle, ImageIcon, Link2, Trash2,
+  Calendar, Laptop, Battery, Monitor, HardDrive,
+  Sparkles, Copy, ChevronDown, Loader2, Cpu, Weight, Plug,
 } from "lucide-react"
-import {
-  Field, TextInput, SelectInput, TagInput,
-  FormSection, SubmitButton, Alert,
-} from "@/components/form-fields"
 
 // ─── Types ────────────────────────────────────────────────────
 export interface LaptopFormData {
@@ -16,7 +15,6 @@ export interface LaptopFormData {
   slug: string
   model: string
   image: string
-  // ✅ imagePublicId removed — client-only, never sent to backend
   laptop_type: string
   cpu: string
   gpu: string
@@ -42,8 +40,8 @@ const EMPTY: LaptopFormData = {
   laptop_type: "", cpu: "", gpu: "", ram: "", storage: "",
   display_size: "", display_resolution: "", display_type: "",
   display_refresh_rate: "", display_brightness: "",
-  battery_life: "", battery_capacity: "", weight: "", usb_c_pd_wattage: "",
-  os: "", features: [], release_date: "",
+  battery_life: "", battery_capacity: "", weight: "",
+  usb_c_pd_wattage: "", os: "", features: [], release_date: "",
 }
 
 type UploadStatus = "idle" | "uploading" | "success" | "error"
@@ -55,18 +53,18 @@ interface UploadState {
   errorMsg: string
 }
 
-const EMPTY_UPLOAD: UploadState = {
-  status: "idle", progress: 0, fileName: "", errorMsg: "",
-}
+const EMPTY_UPLOAD: UploadState = { status: "idle", progress: 0, fileName: "", errorMsg: "" }
 
-function validate(d: LaptopFormData, mode: "create" | "edit" = "create") {
+// ─── Validation ───────────────────────────────────────────────
+function validate(d: LaptopFormData, mode: "create" | "edit") {
   const e: Partial<Record<keyof LaptopFormData, string>> = {}
-  if (!d.name.trim())    e.name         = "Required"
-  if (!d.brand.trim())   e.brand        = "Required"
-  if (!d.slug.trim())    e.slug         = "Required"
-  if (!d.model.trim())   e.model        = "Required"
-  if (mode === "create" && !d.image?.trim()) e.image = "Image required"
-  if (!d.release_date)   e.release_date = "Required"
+  if (!d.name.trim())             e.name             = "Laptop name is required"
+  if (!d.brand.trim())            e.brand            = "Brand is required"
+  if (!d.slug.trim())             e.slug             = "Slug is required"
+  if (!d.model.trim())            e.model            = "Model number is required"
+  if (mode === "create" && !d.image?.trim()) e.image = "Please upload a laptop image"
+  if (!d.release_date)            e.release_date     = "Release date is required"
+  if (!d.battery_capacity.trim()) e.battery_capacity = "Battery capacity is required"
   return e
 }
 
@@ -74,510 +72,679 @@ function toSlug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 }
 
+// ─── Cloudinary helpers ───────────────────────────────────────
 function extractPublicId(url: string): string {
   try {
     const match = url.match(/\/upload\/v\d+\/(.+)\.[^.]+$/)
     return match ? match[1] : ""
-  } catch {
-    return ""
-  }
+  } catch { return "" }
 }
 
-const LAPTOP_TYPE_OPTIONS = [
-  { value: "ultrabook", label: "Ultrabook" },
-  { value: "gaming", label: "Gaming" },
-  { value: "workstation", label: "Workstation" },
-  { value: "budget", label: "Budget" },
-  { value: "2-in-1", label: "2-in-1" },
-]
+async function deleteCloudinaryImage(publicId: string) {
+  await fetch("/api/upload/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ public_id: publicId }),
+  })
+}
 
-const OS_OPTIONS = [
-  { value: "Windows 11", label: "Windows 11" },
-  { value: "macOS 15", label: "macOS 15" },
-  { value: "Linux", label: "Linux" },
-]
+// ─── Options ──────────────────────────────────────────────────
+const LAPTOP_TYPE_OPTIONS = ["Ultrabook", "Gaming", "Workstation", "Budget", "2-in-1", "Business", "Creator"]
+const OS_OPTIONS          = ["Windows 11", "Windows 11 Pro", "macOS 15", "Linux", "ChromeOS"]
+const RAM_OPTIONS         = ["4GB", "8GB", "16GB", "24GB", "32GB", "48GB", "64GB", "96GB", "128GB"]
+const STORAGE_OPTIONS     = ["128GB", "256GB", "512GB", "1TB", "2TB", "4TB"]
+const DISPLAY_TYPE_OPTIONS = ["IPS", "OLED", "AMOLED", "Mini-LED", "VA", "TN", "QLED"]
+const REFRESH_RATE_OPTIONS = ["60Hz", "90Hz", "120Hz", "144Hz", "165Hz", "240Hz"]
+const ACCEPTED_TYPES      = "image/jpeg,image/png,image/webp,image/avif"
+const MAX_MB              = 5
 
-const ACCEPTED = "image/jpeg,image/png,image/webp,image/avif"
-const MAX_MB   = 5
+// ─── UI Primitives ────────────────────────────────────────────
+function Section({ title, icon: Icon, children }: {
+  title: string
+  icon?: React.ComponentType<{ className?: string }>
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-2xl border border-white/[0.06] bg-[#13131a] overflow-hidden">
+      <div className="flex items-center gap-2.5 border-b border-white/[0.04] px-6 py-4">
+        {Icon && <Icon className="h-4 w-4 text-purple-400" />}
+        <h3 className="text-sm font-semibold text-[#f0eeff]">{title}</h3>
+      </div>
+      <div className="p-6 space-y-5">{children}</div>
+    </div>
+  )
+}
+
+function Label({ children, required, hint }: {
+  children: React.ReactNode
+  required?: boolean
+  hint?: string
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <label className="text-xs font-medium text-[#a0a0b8]">{children}</label>
+      {required && <span className="text-[10px] text-red-400">*</span>}
+      {hint && <span className="text-[10px] text-[#555570] ml-auto">{hint}</span>}
+    </div>
+  )
+}
+
+function Input({
+  value, onChange, placeholder, type = "text", error, icon: Icon,
+}: {
+  value: string
+  onChange?: (v: string) => void
+  placeholder?: string
+  type?: string
+  error?: string
+  icon?: React.ComponentType<{ className?: string }>
+}) {
+  return (
+    <div>
+      <div className="relative">
+        {Icon && <Icon className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#555570]" />}
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
+          placeholder={placeholder}
+          className={`w-full rounded-xl border bg-[#0e0e16] px-4 py-2.5 text-sm text-[#f0eeff] placeholder:text-[#444460] outline-none transition-all
+            ${Icon ? "pl-11" : ""}
+            ${error
+              ? "border-red-500/30 focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20"
+              : "border-white/[0.06] focus:border-purple-500/40 focus:ring-1 focus:ring-purple-500/15"
+            }`}
+        />
+      </div>
+      {error && <p className="mt-1.5 text-[11px] text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+function Select({ value, onChange, options, placeholder }: {
+  value: string
+  onChange: (v: string) => void
+  options: string[]
+  placeholder: string
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full appearance-none rounded-xl border border-white/[0.06] bg-[#0e0e16] px-4 py-2.5 text-sm text-[#f0eeff] outline-none transition-all focus:border-purple-500/40 focus:ring-1 focus:ring-purple-500/15"
+      >
+        <option value="" className="bg-[#0e0e16] text-[#444460]">{placeholder}</option>
+        {options.map((opt) => (
+          <option key={opt} value={opt} className="bg-[#0e0e16]">{opt}</option>
+        ))}
+      </select>
+      <ChevronDown className="absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#555570] pointer-events-none" />
+    </div>
+  )
+}
+
+function TagInput({ values, onChange, placeholder }: {
+  values: string[]
+  onChange: (v: string[]) => void
+  placeholder: string
+}) {
+  const [input, setInput] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const addTag = useCallback(() => {
+    const trimmed = input.trim()
+    if (trimmed && !values.includes(trimmed)) {
+      onChange([...values, trimmed])
+      setInput("")
+    }
+  }, [input, values, onChange])
+
+  const removeTag = useCallback((tag: string) => {
+    onChange(values.filter((v) => v !== tag))
+  }, [values, onChange])
+
+  return (
+    <div
+      onClick={() => inputRef.current?.focus()}
+      className="min-h-[46px] cursor-text rounded-xl border border-white/[0.06] bg-[#0e0e16] px-3 py-2 transition-all focus-within:border-purple-500/40 focus-within:ring-1 focus-within:ring-purple-500/15"
+    >
+      <div className="flex flex-wrap gap-2">
+        {values.map((tag) => (
+          <span key={tag} className="inline-flex items-center gap-1.5 rounded-lg bg-purple-500/10 px-2.5 py-1 text-xs font-medium text-purple-300">
+            {tag}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); removeTag(tag) }}
+              className="text-purple-400/60 hover:text-purple-300 transition-colors"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag() }
+            if (e.key === "Backspace" && !input && values.length) removeTag(values[values.length - 1])
+          }}
+          onBlur={addTag}
+          placeholder={values.length ? "" : placeholder}
+          className="min-w-[80px] flex-1 bg-transparent text-sm text-[#f0eeff] placeholder:text-[#444460] outline-none py-1"
+        />
+      </div>
+    </div>
+  )
+}
 
 // ─── Image Upload ─────────────────────────────────────────────
-// publicId is tracked entirely here via useRef — never exposed to parent or backend
-function ImageUpload({
-  value,
-  onChange,
-  error,
-}: {
+function ImageUpload({ value, onChange, error }: {
   value: string
   onChange: (url: string) => void
   error?: string
 }) {
-  const [upload, setUpload]     = useState<UploadState>(EMPTY_UPLOAD)
-  const [tab, setTab]           = useState<"upload" | "url">("upload")
-  const [deleting, setDeleting] = useState(false)
-  const inputRef                = useRef<HTMLInputElement>(null)
+  const [upload, setUpload]         = useState<UploadState>(EMPTY_UPLOAD)
+  const [tab, setTab]               = useState<"upload" | "url">("upload")
+  const [isDragging, setIsDragging] = useState(false)
+  const [deleting, setDeleting]     = useState(false)
+  const inputRef                    = useRef<HTMLInputElement>(null)
+  const publicIdRef                 = useRef<string>("")
+  // ✅ Tracks last-initialised URL so late-arriving edit values are always picked up
+  const initialisedForRef           = useRef<string>("")
 
-  // ✅ publicId lives only here — extracted from URL, never sent anywhere
-  const publicIdRef = useRef<string>("")
-
-  // Initialise when a value already exists (edit mode)
   useEffect(() => {
-    if (value && upload.status === "idle") {
+    if (
+      value &&
+      value !== initialisedForRef.current &&
+      upload.status !== "uploading"
+    ) {
+      initialisedForRef.current = value
       publicIdRef.current = extractPublicId(value)
       setUpload({ status: "success", progress: 100, fileName: "Current image", errorMsg: "" })
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value])
-
-  const deleteFromCloudinary = async (publicId: string) => {
-    await fetch("/api/upload/delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ public_id: publicId }),
-    })
-  }
+  }, [value, upload.status])
 
   const handleFile = async (file: File) => {
     if (file.size > MAX_MB * 1024 * 1024) {
       setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: `File too large — max ${MAX_MB}MB` })
       return
     }
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
+    if (!["jpg", "jpeg", "png", "webp", "avif"].includes(ext)) {
+      setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: "Invalid format — use JPG, PNG, WebP or AVIF" })
+      return
+    }
 
-    setUpload({ status: "uploading", progress: 0, fileName: file.name, errorMsg: "" })
-
-    const formData = new FormData()
-    formData.append("file", file)
-    formData.append("upload_preset", "isync_gadgets")
+    setUpload({ status: "uploading", progress: 5, fileName: file.name, errorMsg: "" })
+    const interval = setInterval(() => {
+      setUpload((p) => ({ ...p, progress: Math.min(p.progress + Math.random() * 15, 85) }))
+    }, 200)
 
     try {
-      const timer = setInterval(() => {
-        setUpload((p) => ({ ...p, progress: Math.min(p.progress + Math.random() * 30, 90) }))
-      }, 200)
-
-      // ✅ Delete old image using client-only publicId before uploading new one
       if (publicIdRef.current) {
-        await deleteFromCloudinary(publicIdRef.current).catch(console.error)
+        await deleteCloudinaryImage(publicIdRef.current).catch(() => {})
         publicIdRef.current = ""
+        initialisedForRef.current = ""
       }
-
-      const res = await fetch("https://api.cloudinary.com/v1_1/daxy0yfue/image/upload", {
-        method: "POST",
-        body: formData,
-      })
-      if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`)
+      const formData = new FormData()
+      formData.append("file", file)
+      const res  = await fetch("/api/upload/server", { method: "POST", body: formData })
+      clearInterval(interval)
 
       const data = await res.json()
-      clearInterval(timer)
+      if (!res.ok) throw new Error(data.error || "Upload failed")
 
-      // ✅ Store publicId client-side only — only URL goes up to the form
-      publicIdRef.current = data.public_id || extractPublicId(data.secure_url) || ""
+      const newUrl: string = data.secure_url || data.url
+      publicIdRef.current       = data.public_id || extractPublicId(newUrl) || ""
+      initialisedForRef.current = newUrl
 
       setUpload({ status: "success", progress: 100, fileName: file.name, errorMsg: "" })
-      onChange(data.secure_url)
+      onChange(newUrl)
     } catch (err: any) {
-      setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: err.message ?? "Upload failed" })
+      clearInterval(interval)
+      setUpload({ status: "error", progress: 0, fileName: file.name, errorMsg: err.message || "Upload failed. Try again." })
     }
   }
 
-  // ✅ Delete from Cloudinary using client-side publicId, then clear state
   const clear = async () => {
     if (publicIdRef.current) {
       setDeleting(true)
-      await deleteFromCloudinary(publicIdRef.current).catch(console.error)
+      await deleteCloudinaryImage(publicIdRef.current).catch(() => {})
       publicIdRef.current = ""
-      setDeleting(false)
     }
+    initialisedForRef.current = ""
+    setDeleting(false)
     setUpload(EMPTY_UPLOAD)
     onChange("")
     if (inputRef.current) inputRef.current.value = ""
   }
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
+  const handleDragOver  = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(true) }, [])
+  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(false) }, [])
+  const handleDrop      = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setIsDragging(false)
     const file = e.dataTransfer.files[0]
     if (file) handleFile(file)
-  }
-
-  const handleCopy = () => {
-    if (value) navigator.clipboard.writeText(value).catch(console.error)
-  }
+  }, [])
 
   return (
-    <div className="space-y-3">
-      {/* Tab switcher */}
-      <div className="flex rounded-lg border border-white/8 bg-[#0a0a0f] p-0.5 w-fit">
+    <div className="space-y-4">
+      {/* Tabs */}
+      <div className="inline-flex rounded-xl border border-white/[0.06] bg-[#0e0e16] p-1">
         {(["upload", "url"] as const).map((t) => (
           <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
-              tab === t ? "bg-purple-500/20 text-purple-300" : "text-[#8884a0] hover:text-[#f0eeff]"
-            }`}
+            key={t} type="button" onClick={() => setTab(t)}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-medium transition-all
+              ${tab === t ? "bg-purple-500/15 text-purple-300" : "text-[#555570] hover:text-[#a0a0b8]"}`}
           >
-            {t === "upload" ? <Upload className="h-3 w-3" /> : <Link2 className="h-3 w-3" />}
-            {t === "upload" ? "Upload File" : "Paste URL"}
+            {t === "upload" ? <Upload className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
+            {t === "upload" ? "Upload" : "URL"}
           </button>
         ))}
       </div>
 
-      {/* ── Upload tab ── */}
+      {/* Upload tab */}
       {tab === "upload" && (
-        <div className="space-y-3">
-          {/* Drop zone */}
-          {upload.status === "idle" && (
-            <div
-              onDrop={handleDrop}
-              onDragOver={(e) => e.preventDefault()}
-              onClick={() => inputRef.current?.click()}
-              className={`group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 transition-all ${
-                error
-                  ? "border-red-500/40 bg-red-500/5"
-                  : "border-white/12 bg-[#0a0a0f] hover:border-purple-500/40 hover:bg-purple-500/5"
-              }`}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-white/4 transition-all group-hover:border-purple-500/40 group-hover:bg-purple-500/10">
-                <ImageIcon className="h-6 w-6 text-[#8884a0] group-hover:text-purple-400" />
-              </div>
-              <div className="text-center">
-                <p className="text-sm font-medium text-[#f0eeff]">
-                  Drop image here or <span className="text-purple-400">browse</span>
-                </p>
-                <p className="mt-0.5 text-[11px] text-[#8884a0]">JPG, PNG, WebP · max {MAX_MB}MB</p>
-              </div>
-              <input
-                ref={inputRef}
-                type="file"
-                accept={ACCEPTED}
-                className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
-              />
-            </div>
-          )}
-
-          {/* Uploading */}
-          {upload.status === "uploading" && (
-            <div className="rounded-xl border border-white/8 bg-[#0a0a0f] p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-lg border border-white/8 bg-[#14141c] flex items-center justify-center">
-                    <Upload className="h-3.5 w-3.5 text-purple-400 animate-bounce" />
+        <div className="space-y-4">
+          {(upload.status === "idle" || upload.status === "error") && (
+            <>
+              <div
+                onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
+                onClick={() => inputRef.current?.click()}
+                className={`group relative cursor-pointer rounded-2xl border-2 border-dashed p-8 transition-all
+                  ${isDragging
+                    ? "border-purple-500/50 bg-purple-500/5 scale-[1.01]"
+                    : error
+                    ? "border-red-500/30 bg-red-500/[0.02]"
+                    : "border-white/[0.08] bg-[#0e0e16] hover:border-purple-500/30 hover:bg-purple-500/[0.02]"
+                  }`}
+              >
+                <input
+                  ref={inputRef} type="file" accept={ACCEPTED_TYPES} className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
+                />
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <div className={`flex h-14 w-14 items-center justify-center rounded-2xl border transition-all
+                    ${isDragging
+                      ? "border-purple-500/30 bg-purple-500/10"
+                      : "border-white/[0.06] bg-white/[0.02] group-hover:border-purple-500/20 group-hover:bg-purple-500/5"}`}
+                  >
+                    <Upload className={`h-6 w-6 transition-colors ${isDragging ? "text-purple-400" : "text-[#555570] group-hover:text-purple-400"}`} />
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-[#f0eeff] truncate max-w-[200px]">{upload.fileName}</p>
-                    <p className="text-[11px] text-[#8884a0]">Uploading...</p>
+                    <p className="text-sm font-medium text-[#f0eeff]">
+                      {isDragging ? "Drop image here" : <><span>Drop image or </span><span className="text-purple-400">click to browse</span></>}
+                    </p>
+                    <p className="mt-1 text-[11px] text-[#555570]">JPG, PNG, WebP, AVIF · Max {MAX_MB}MB</p>
                   </div>
                 </div>
-                <span className="text-xs font-semibold text-purple-400">{Math.round(upload.progress)}%</span>
               </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/8">
+
+              {upload.status === "error" && (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.03] p-5">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-red-300">Upload failed</p>
+                      <p className="text-xs text-[#555570] mt-1">{upload.errorMsg}</p>
+                    </div>
+                    <button type="button" onClick={() => setUpload(EMPTY_UPLOAD)} className="text-xs text-purple-400 hover:text-purple-300 transition-colors">
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {upload.status === "uploading" && (
+            <div className="rounded-2xl border border-white/[0.06] bg-[#0e0e16] p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
+                    <Loader2 className="h-5 w-5 text-purple-400 animate-spin" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[#f0eeff]">{upload.fileName}</p>
+                    <p className="text-xs text-[#555570]">Uploading to cloud...</p>
+                  </div>
+                </div>
+                <span className="text-sm font-semibold text-purple-400">{Math.round(upload.progress)}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-white/[0.04]">
                 <div
-                  className="h-full rounded-full bg-linear-to-r from-purple-600 to-violet-500 transition-all duration-200"
+                  className="h-full rounded-full bg-gradient-to-r from-purple-600 to-violet-500 transition-all duration-300 ease-out"
                   style={{ width: `${upload.progress}%` }}
                 />
               </div>
             </div>
           )}
 
-          {/* Success */}
           {upload.status === "success" && value && (
-            <div className="relative rounded-xl overflow-hidden border border-emerald-500/25 bg-[#0a0a0f]">
-              <div className="relative w-full aspect-video bg-[#0e0e16] flex items-center justify-center">
+            <div className="rounded-2xl border border-emerald-500/20 bg-[#0e0e16] overflow-hidden">
+              <div className="relative aspect-[16/9] bg-[#0a0a0f]">
                 <img
-                  src={value}
-                  alt="Uploaded preview"
-                  className="h-full w-full object-contain p-4"
+                  src={value} alt="Laptop preview"
+                  className="h-full w-full object-contain p-6"
                   onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.jpg" }}
                 />
-                {/* ✅ X button — triggers client-side Cloudinary delete, no publicId in backend payload */}
                 <button
-                  type="button"
-                  onClick={clear}
-                  disabled={deleting}
-                  title="Remove image"
-                  className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/60 text-[#8884a0] backdrop-blur-sm transition-all hover:border-red-500/60 hover:bg-red-500/20 hover:text-red-400 disabled:opacity-50"
+                  type="button" onClick={clear} disabled={deleting}
+                  className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/70 backdrop-blur-sm transition-all hover:bg-red-500/80 hover:text-white disabled:opacity-50"
                 >
-                  {deleting ? (
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-red-400" />
-                  ) : (
-                    <X className="h-3.5 w-3.5" />
-                  )}
+                  {deleting
+                    ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                    : <X className="h-4 w-4" />
+                  }
                 </button>
               </div>
-              <div className="flex items-center gap-3 px-4 py-3 border-t border-white/6">
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+              <div className="flex items-center gap-3 border-t border-white/[0.04] px-4 py-3">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-emerald-300">Uploaded successfully</p>
-                  <p className="text-[10px] text-[#8884a0] truncate">{upload.fileName}</p>
+                  <p className="text-xs font-medium text-emerald-300">Upload complete</p>
+                  <p className="text-[11px] text-[#555570] truncate">{upload.fileName}</p>
                 </div>
                 <button
                   type="button"
-                  onClick={clear}
-                  disabled={deleting}
-                  className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-400 transition-all hover:bg-red-500/20 disabled:opacity-50"
+                  onClick={() => navigator.clipboard.writeText(value).catch(() => {})}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] px-2.5 py-1.5 text-[11px] text-[#a0a0b8] transition-all hover:border-purple-500/30 hover:text-purple-300"
+                >
+                  <Copy className="h-3 w-3" />
+                  Copy URL
+                </button>
+                <button
+                  type="button" onClick={clear} disabled={deleting}
+                  className="flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-1.5 text-[11px] text-red-400 transition-all hover:bg-red-500/10 disabled:opacity-50"
                 >
                   <Trash2 className="h-3 w-3" />
-                  {deleting ? "Deleting..." : "Delete"}
+                  {deleting ? "Removing..." : "Remove"}
                 </button>
               </div>
             </div>
           )}
+        </div>
+      )}
 
-          {/* Error */}
-          {upload.status === "error" && (
-            <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-                  <div>
-                    <p className="text-xs font-semibold text-red-300">Upload failed</p>
-                    <p className="text-[11px] text-[#8884a0]">{upload.errorMsg}</p>
-                  </div>
-                </div>
-                <button type="button" onClick={() => setUpload(EMPTY_UPLOAD)} className="text-[#8884a0] hover:text-[#f0eeff]">
+      {/* URL tab */}
+      {tab === "url" && (
+        <div className="space-y-4">
+          <div className="relative">
+            <Link2 className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#555570]" />
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => {
+                const v = e.target.value
+                publicIdRef.current = extractPublicId(v)
+                initialisedForRef.current = v
+                onChange(v)
+              }}
+              placeholder="https://cdn.example.com/laptop.png"
+              className="w-full rounded-xl border border-white/[0.06] bg-[#0e0e16] pl-11 pr-4 py-2.5 text-sm text-[#f0eeff] placeholder:text-[#444460] outline-none transition-all focus:border-purple-500/40 focus:ring-1 focus:ring-purple-500/15"
+            />
+          </div>
+          {value && (
+            <div className="rounded-2xl border border-white/[0.06] bg-[#0e0e16] overflow-hidden">
+              <div className="relative aspect-[16/9] bg-[#0a0a0f]">
+                <img
+                  src={value} alt="URL preview"
+                  className="h-full w-full object-contain p-6"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
+                />
+                <button
+                  type="button" onClick={clear}
+                  className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/70 backdrop-blur-sm transition-all hover:bg-red-500/80 hover:text-white"
+                >
                   <X className="h-4 w-4" />
                 </button>
               </div>
+              <div className="border-t border-white/[0.04] px-4 py-2.5">
+                <p className="text-[11px] text-[#555570] truncate">{value}</p>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* ── URL tab ── */}
-      {tab === "url" && (
-        <div className="space-y-2">
-          <TextInput
-            placeholder="https://example.com/image.jpg"
-            value={value}
-            onChange={(v) => {
-              // ✅ Extract publicId client-side when user pastes a Cloudinary URL
-              publicIdRef.current = extractPublicId(v)
-              onChange(v)
-            }}
-          />
-          {value && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="flex-1 rounded-lg border border-white/10 py-2 text-sm text-[#8884a0] transition-all hover:border-white/20 hover:text-[#f0eeff]"
-              >
-                Copy URL
-              </button>
-              <button
-                type="button"
-                onClick={clear}
-                disabled={deleting}
-                className="flex-1 rounded-lg border border-red-500/30 bg-red-500/10 py-2 text-sm text-red-400 transition-all hover:bg-red-500/20 disabled:opacity-50"
-              >
-                {deleting ? "Clearing..." : "Clear"}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {error && <p className="mt-1 text-[11px] text-red-400">{error}</p>}
+      {error && <p className="text-[11px] text-red-400">{error}</p>}
     </div>
   )
 }
 
 // ─── Main Form ────────────────────────────────────────────────
-interface LaptopFormProps {
+export interface LaptopFormProps {
   initialData?: Partial<LaptopFormData>
   onSubmit: (data: LaptopFormData) => Promise<{ ok: boolean; message: string }>
   mode?: "create" | "edit"
+  isSubmitting?: boolean
 }
 
-export function LaptopForm({ initialData, onSubmit, mode = "create" }: LaptopFormProps) {
-  const [data, setData]       = useState<LaptopFormData>({ ...EMPTY, ...initialData })
-  const [errors, setErrors]   = useState<Partial<Record<keyof LaptopFormData, string>>>({})
-  const [loading, setLoading] = useState(false)
-  const [alert, setAlert]     = useState<{ type: "success" | "error"; message: string } | null>(null)
+export function LaptopForm({ initialData, onSubmit, mode = "create", isSubmitting = false }: LaptopFormProps) {
+  const [data, setData]     = useState<LaptopFormData>({ ...EMPTY, ...initialData })
+  const [errors, setErrors] = useState<Partial<Record<keyof LaptopFormData, string>>>({})
   const [slugLocked, setSlugLocked] = useState(mode === "edit")
+  const [touched, setTouched]       = useState<Set<string>>(new Set())
 
+  // ✅ Re-sync when initialData arrives late (async fetch in edit mode)
   useEffect(() => {
-    if (initialData && mode === "edit") {
-      setData((prev) => ({ ...prev, ...initialData }))
-    }
-  }, [initialData, mode])
+    if (initialData) setData((prev) => ({ ...prev, ...initialData }))
+  }, [initialData])
 
-  const set = <K extends keyof LaptopFormData>(k: K, v: LaptopFormData[K]) => {
+  const setField = <K extends keyof LaptopFormData>(k: K, v: LaptopFormData[K]) => {
     setData((p) => {
       const next = { ...p, [k]: v }
       if (k === "name" && !slugLocked) next.slug = toSlug(v as string)
       return next
     })
+    setTouched((prev) => new Set(prev).add(k))
     if (errors[k]) setErrors((p) => ({ ...p, [k]: undefined }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setTouched(new Set(Object.keys(data)))
+
     const errs = validate(data, mode)
     if (Object.keys(errs).length) {
       setErrors(errs)
-      document.querySelector("[data-error]")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      document.querySelector("[data-error='true']")?.scrollIntoView({ behavior: "smooth", block: "center" })
       return
     }
-    setLoading(true)
-    setAlert(null)
-    try {
-      // ✅ data has no imagePublicId — clean payload goes to backend
-      const res = await onSubmit(data)
-      setAlert({ type: res.ok ? "success" : "error", message: res.message })
-      if (res.ok && mode === "create") {
-        setData(EMPTY)
-        setErrors({})
-        window.scrollTo({ top: 0, behavior: "smooth" })
-      }
-    } finally {
-      setLoading(false)
+
+    const res = await onSubmit(data)
+    if (res.ok && mode === "create") {
+      setData(EMPTY)
+      setErrors({})
+      setTouched(new Set())
     }
   }
 
-  return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-8">
-      {alert && <Alert type={alert.type} message={alert.message} />}
+  const showError = (field: keyof LaptopFormData) =>
+    touched.has(field) ? errors[field] : undefined
 
-      {/* ── Identity ── */}
-      <FormSection title="Identity">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Laptop Name" required error={errors.name}>
-            <TextInput value={data.name} onChange={(v) => set("name", v)} placeholder="e.g. MacBook Pro 16" />
-          </Field>
-          <Field label="Brand" required error={errors.brand}>
-            <TextInput value={data.brand} onChange={(v) => set("brand", v)} placeholder="e.g. Apple" />
-          </Field>
+  return (
+    <form onSubmit={handleSubmit} noValidate className="space-y-6">
+
+      {/* ── Basic Information ── */}
+      <Section title="Basic Information" icon={Laptop}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div data-error={!!showError("name")}>
+            <Label required>Laptop Name</Label>
+            <Input value={data.name} onChange={(v) => setField("name", v)} placeholder="MacBook Pro 16" error={showError("name")} icon={Laptop} />
+          </div>
+          <div data-error={!!showError("brand")}>
+            <Label required>Brand</Label>
+            <Input value={data.brand} onChange={(v) => setField("brand", v)} placeholder="Apple" error={showError("brand")} />
+          </div>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Slug" required error={errors.slug} hint="Auto-generated from name">
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div data-error={!!showError("slug")}>
+            <Label required hint={mode === "create" ? "Auto-generated" : undefined}>Slug</Label>
             <div className="relative">
-              <TextInput
+              <Input
                 value={data.slug}
-                onChange={(v) => { setSlugLocked(true); set("slug", v.toLowerCase().replace(/[^a-z0-9-]/g, "")) }}
+                onChange={(v) => { setSlugLocked(true); setField("slug", v.toLowerCase().replace(/[^a-z0-9-]/g, "")) }}
                 placeholder="macbook-pro-16"
+                error={showError("slug")}
               />
               {mode === "create" && (
                 <button
                   type="button"
-                  onClick={() => { setSlugLocked(false); set("slug", toSlug(data.name)) }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-purple-400/70 hover:text-purple-400"
+                  onClick={() => { setSlugLocked(false); setField("slug", toSlug(data.name)) }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-purple-400/60 hover:text-purple-400 transition-colors"
                 >
-                  ↺ auto
+                  Auto
                 </button>
               )}
             </div>
-          </Field>
-          <Field label="Model Number" required error={errors.model}>
-            <TextInput value={data.model} onChange={(v) => set("model", v)} placeholder="e.g. M4 Max" />
-          </Field>
+          </div>
+          <div data-error={!!showError("model")}>
+            <Label required>Model Number</Label>
+            <Input value={data.model} onChange={(v) => setField("model", v)} placeholder="MX2Y3LL/A" error={showError("model")} />
+          </div>
         </div>
-        <Field label="Release Date" required error={errors.release_date}>
-          <TextInput type="date" value={data.release_date} onChange={(v) => set("release_date", v)} />
-        </Field>
-      </FormSection>
 
-      {/* ── Media ── */}
-      <FormSection title="Media">
-        <Field label="Laptop Image" required error={errors.image}>
-          {/* ✅ No publicId prop — ImageUpload manages it internally */}
-          <ImageUpload
-            value={data.image}
-            onChange={(v) => set("image", v)}
-            error={errors.image}
-          />
-        </Field>
-      </FormSection>
-
-      {/* ── Type & OS ── */}
-      <FormSection title="Type & OS">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Laptop Type">
-            <SelectInput value={data.laptop_type} onChange={(v) => set("laptop_type", v)} options={LAPTOP_TYPE_OPTIONS} placeholder="Select type" />
-          </Field>
-          <Field label="Operating System">
-            <SelectInput value={data.os} onChange={(v) => set("os", v)} options={OS_OPTIONS} placeholder="Select OS" />
-          </Field>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div data-error={!!showError("release_date")}>
+            <Label required>Release Date</Label>
+            <Input type="date" value={data.release_date} onChange={(v) => setField("release_date", v)} error={showError("release_date")} icon={Calendar} />
+          </div>
+          <div>
+            <Label>Laptop Type</Label>
+            <Select value={data.laptop_type} onChange={(v) => setField("laptop_type", v)} options={LAPTOP_TYPE_OPTIONS} placeholder="Select type" />
+          </div>
         </div>
-      </FormSection>
+
+        <div>
+          <Label>Operating System</Label>
+          <Select value={data.os} onChange={(v) => setField("os", v)} options={OS_OPTIONS} placeholder="Select OS" />
+        </div>
+      </Section>
+
+      {/* ── Product Image ── */}
+      <Section title="Product Image" icon={ImageIcon}>
+        <div data-error={!!showError("image")}>
+          <Label required={mode === "create"}>Laptop Image</Label>
+          <ImageUpload value={data.image} onChange={(v) => setField("image", v)} error={showError("image")} />
+        </div>
+      </Section>
 
       {/* ── Hardware ── */}
-      <FormSection title="Hardware">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="CPU" hint='e.g. "Intel Core Ultra 7 256V"'>
-            <TextInput value={data.cpu} onChange={(v) => set("cpu", v)} placeholder="Intel Core Ultra 7 256V" />
-          </Field>
-          <Field label="GPU" hint='e.g. "Nvidia RTX 5070"'>
-            <TextInput value={data.gpu} onChange={(v) => set("gpu", v)} placeholder="Nvidia RTX 5070" />
-          </Field>
+      <Section title="Hardware" icon={Cpu}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <Label hint='e.g. "Apple M4 Max"'>CPU</Label>
+            <Input value={data.cpu} onChange={(v) => setField("cpu", v)} placeholder="Apple M4 Max" icon={Cpu} />
+          </div>
+          <div>
+            <Label hint='e.g. "40-core GPU"'>GPU</Label>
+            <Input value={data.gpu} onChange={(v) => setField("gpu", v)} placeholder="Apple M4 Max 40-core GPU" />
+          </div>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="RAM" hint='e.g. "16GB LPDDR5X"'>
-            <TextInput value={data.ram} onChange={(v) => set("ram", v)} placeholder="16GB LPDDR5X" />
-          </Field>
-          <Field label="Storage" hint='e.g. "1TB PCIe 4.0 SSD"'>
-            <TextInput value={data.storage} onChange={(v) => set("storage", v)} placeholder="1TB PCIe 4.0 SSD" />
-          </Field>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <Label>RAM</Label>
+            <Select value={data.ram} onChange={(v) => setField("ram", v)} options={RAM_OPTIONS} placeholder="Select RAM" />
+          </div>
+          <div>
+            <Label>Storage</Label>
+            <Select value={data.storage} onChange={(v) => setField("storage", v)} options={STORAGE_OPTIONS} placeholder="Select Storage" />
+          </div>
         </div>
-      </FormSection>
+      </Section>
 
       {/* ── Display ── */}
-      <FormSection title="Display">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Display Size" hint='e.g. "14-inch"'>
-            <TextInput value={data.display_size} onChange={(v) => set("display_size", v)} placeholder="14-inch" />
-          </Field>
-          <Field label="Resolution" hint='e.g. "2880×1800"'>
-            <TextInput value={data.display_resolution} onChange={(v) => set("display_resolution", v)} placeholder="2880×1800" />
-          </Field>
+      <Section title="Display" icon={Monitor}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <Label hint='e.g. "16.2-inch"'>Display Size</Label>
+            <Input value={data.display_size} onChange={(v) => setField("display_size", v)} placeholder='16.2"' />
+          </div>
+          <div>
+            <Label hint='e.g. "3456×2234"'>Resolution</Label>
+            <Input value={data.display_resolution} onChange={(v) => setField("display_resolution", v)} placeholder="3456×2234" />
+          </div>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Display Type" hint='e.g. "OLED"'>
-            <TextInput value={data.display_type} onChange={(v) => set("display_type", v)} placeholder="OLED" />
-          </Field>
-          <Field label="Refresh Rate" hint='e.g. "120Hz"'>
-            <TextInput value={data.display_refresh_rate} onChange={(v) => set("display_refresh_rate", v)} placeholder="120Hz" />
-          </Field>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div>
+            <Label>Display Type</Label>
+            <Select value={data.display_type} onChange={(v) => setField("display_type", v)} options={DISPLAY_TYPE_OPTIONS} placeholder="Select type" />
+          </div>
+          <div>
+            <Label>Refresh Rate</Label>
+            <Select value={data.display_refresh_rate} onChange={(v) => setField("display_refresh_rate", v)} options={REFRESH_RATE_OPTIONS} placeholder="Select rate" />
+          </div>
+          <div>
+            <Label hint='e.g. "1000 nits"'>Brightness</Label>
+            <Input value={data.display_brightness} onChange={(v) => setField("display_brightness", v)} placeholder="1000 nits" />
+          </div>
         </div>
-        <Field label="Brightness" hint='e.g. "400 nits"'>
-          <TextInput value={data.display_brightness} onChange={(v) => set("display_brightness", v)} placeholder="400 nits" />
-        </Field>
-      </FormSection>
+      </Section>
 
       {/* ── Battery & Power ── */}
-      <FormSection title="Battery & Power">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Battery Life" hint='e.g. "17h"'>
-            <TextInput value={data.battery_life} onChange={(v) => set("battery_life", v)} placeholder="17h" />
-          </Field>
-          <Field label="Battery Capacity" hint='e.g. "70Wh"'>
-            <TextInput value={data.battery_capacity} onChange={(v) => set("battery_capacity", v)} placeholder="70Wh" />
-          </Field>
+      <Section title="Battery & Power" icon={Battery}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div data-error={!!showError("battery_capacity")}>
+            <Label required hint='e.g. "100Wh"'>Battery Capacity</Label>
+            <Input value={data.battery_capacity} onChange={(v) => setField("battery_capacity", v)} placeholder="100Wh" error={showError("battery_capacity")} icon={Battery} />
+          </div>
+          <div>
+            <Label hint='e.g. "22h"'>Battery Life</Label>
+            <Input value={data.battery_life} onChange={(v) => setField("battery_life", v)} placeholder="22h" />
+          </div>
+          <div>
+            <Label hint='e.g. "140W"'>USB-C PD Wattage</Label>
+            <Input value={data.usb_c_pd_wattage} onChange={(v) => setField("usb_c_pd_wattage", v)} placeholder="140W" icon={Plug} />
+          </div>
         </div>
-        <Field label="USB-C PD Wattage" hint='e.g. "140W"'>
-          <TextInput value={data.usb_c_pd_wattage} onChange={(v) => set("usb_c_pd_wattage", v)} placeholder="140W" />
-        </Field>
-      </FormSection>
+      </Section>
 
       {/* ── Physical ── */}
-      <FormSection title="Physical">
-        <Field label="Weight" hint='e.g. "1.24kg"'>
-          <TextInput value={data.weight} onChange={(v) => set("weight", v)} placeholder="1.24kg" />
-        </Field>
-      </FormSection>
+      <Section title="Physical" icon={Weight}>
+        <div>
+          <Label hint='e.g. "2.14kg"'>Weight</Label>
+          <Input value={data.weight} onChange={(v) => setField("weight", v)} placeholder="2.14kg" icon={Weight} />
+        </div>
+      </Section>
 
       {/* ── Features ── */}
-      <FormSection title="Features">
-        <Field label="Features" hint="Press Enter to add">
-          <TagInput values={data.features} onChange={(v) => set("features", v)} placeholder="e.g. Wi-Fi 7, Thunderbolt 4" />
-        </Field>
-      </FormSection>
+      <Section title="Features" icon={Sparkles}>
+        <div>
+          <Label hint="Press Enter or comma to add">Features</Label>
+          <TagInput values={data.features} onChange={(v) => setField("features", v)} placeholder="Wi-Fi 6E, Thunderbolt 4, Touch ID..." />
+        </div>
+      </Section>
 
       {/* ── Submit ── */}
-      <SubmitButton
-        loading={loading}
-        label={mode === "create" ? "Create Laptop" : "Save Changes"}
-        loadingLabel={mode === "create" ? "Creating..." : "Saving..."}
-      />
+      <div className="flex items-center justify-between pt-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (confirm("Reset all fields?")) {
+              setData({ ...EMPTY, ...initialData })
+              setErrors({})
+              setTouched(new Set())
+            }
+          }}
+          className="text-sm text-[#555570] hover:text-[#a0a0b8] transition-colors"
+        >
+          Reset form
+        </button>
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-2.5 text-sm font-medium text-white transition-all hover:bg-purple-500 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSubmitting ? (
+            <><Loader2 className="h-4 w-4 animate-spin" />{mode === "create" ? "Adding..." : "Saving..."}</>
+          ) : (
+            <><Sparkles className="h-4 w-4" />{mode === "create" ? "Add Laptop" : "Save Changes"}</>
+          )}
+        </button>
+      </div>
     </form>
   )
 }
