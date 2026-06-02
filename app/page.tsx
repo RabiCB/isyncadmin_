@@ -4,10 +4,10 @@ import { Smartphone, Laptop, Volume2, Watch, Gamepad2, ArrowRight } from "lucide
 
 const CARDS = [
   { label: "Phones",    href: "/phones",   icon: Smartphone, color: "from-purple-600 to-violet-600" },
-  { label: "Laptops",   href: "/admin/laptops",  icon: Laptop,     color: "from-blue-600 to-cyan-600"    },
-  { label: "Speakers",  href: "/admin/speakers", icon: Volume2,    color: "from-emerald-600 to-teal-600" },
-  { label: "Wearables", href: "/admin/wearables",icon: Watch,      color: "from-amber-600 to-orange-600" },
-  { label: "Gaming",    href: "/admin/gaming",   icon: Gamepad2,   color: "from-red-600 to-pink-600"     },
+  { label: "Laptops",   href: "/laptops",  icon: Laptop,     color: "from-blue-600 to-cyan-600"    },
+  { label: "Speakers",  href: "/speakers", icon: Volume2,    color: "from-emerald-600 to-teal-600" },
+  { label: "Wearables", href: "/wearables",icon: Watch,      color: "from-amber-600 to-orange-600" },
+  { label: "Gaming",    href: "/gaming",   icon: Gamepad2,   color: "from-red-600 to-pink-600"     },
 ]
 
 export default function AdminDashboard() {

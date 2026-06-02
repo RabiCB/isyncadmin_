@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Smartphone, Laptop, Volume2, Watch, Gamepad2, Settings, Menu, X, LucideIcon, Code } from "lucide-react"
+import { Smartphone, Laptop, Home, Volume2, Watch, Gamepad2, Settings, Menu, X, LucideIcon, Code } from "lucide-react"
 
 interface SidebarLink {
   label: string
@@ -11,13 +11,14 @@ interface SidebarLink {
 }
 
 const SIDEBAR_LINKS: SidebarLink[] = [
-  { label: "Dashboard", href: "/", icon: Smartphone },
+  { label: "Dashboard", href: "/", icon: Home },
+  {label: "Phones", href: "/phones", icon: Smartphone },
   { label: "Laptops", href: "/laptops", icon: Laptop },
-  { label: "Speakers", href: "#speakers", icon: Volume2 },
-  { label: "Wearables", href: "#wearables", icon: Watch },
-  { label: "Gaming", href: "#gaming", icon: Gamepad2 },
+  { label: "Speakers", href: "/speakers", icon: Volume2 },
+  { label: "Wearables", href: "/wearables", icon: Watch },
+  { label: "Gaming", href: "/gaming", icon: Gamepad2 },
   { label: "API Tester", href: "/api-tester", icon: Code },
-  { label: "Settings", href: "#settings", icon: Settings },
+  { label: "Settings", href: "/settings", icon: Settings },
 ]
 
 export function LayoutClient({ children }: { children: React.ReactNode }) {
