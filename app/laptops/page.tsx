@@ -16,7 +16,7 @@ export default function AdminLaptopsPage() {
           className="rounded-xl bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-600 transition-colors"
         >
           + Add Laptop
-        </a>
+        </a>          
       </div>
 
       <LaptopTable apiBaseUrl={process.env.NEXT_PUBLIC_API_BASE!} />
