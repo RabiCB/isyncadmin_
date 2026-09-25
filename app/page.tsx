@@ -8,6 +8,12 @@ const CARDS = [
   { label: "Speakers",  href: "/speakers", icon: Volume2,    color: "from-emerald-600 to-teal-600" },
   { label: "Wearables", href: "/wearables",icon: Watch,      color: "from-amber-600 to-orange-600" },
   { label: "Gaming",    href: "/gaming",   icon: Gamepad2,   color: "from-red-600 to-pink-600"     },
+  {
+    label: "Cameras",
+    href: "/cameras",
+    icon: Smartphone,
+    color: "from-purple-600 to-violet-600",
+  }
 ]
 
 export default function AdminDashboard() {
