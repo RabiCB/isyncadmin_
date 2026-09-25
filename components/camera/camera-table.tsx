@@ -132,7 +132,7 @@ export function CameraTable({ apiBaseUrl }: { apiBaseUrl: string }) {
                   <div className="flex items-center justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => router.push(`/admin/cameras/${camera.id}/edit`)}
+                      onClick={() => router.push(`/cameras/${camera.id}/edit`)}
                       className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.06] text-[#555570] transition-all hover:border-purple-500/30 hover:text-purple-400"
                     >
                       <Pencil className="h-3.5 w-3.5" />
